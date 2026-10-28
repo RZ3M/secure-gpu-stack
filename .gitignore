@@ -1,0 +1,15 @@
+# Rendered cloud-init files have a real SSH public key filled in
+my-cloud-init*.yaml
+
+# Output from running look-around.sh; regenerate instead of committing
+*-results.txt
+
+# Secrets: API keys belong in environment variables, never in the repo
+.env
+.env.*
+*.pem
+id_*
+
+# Local tool settings
+.claude/settings.local.json
+.DS_Store

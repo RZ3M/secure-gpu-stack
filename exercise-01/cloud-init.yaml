@@ -1,0 +1,65 @@
+#cloud-config
+# Exercise 1: a first-boot setup script.
+#
+# cloud-init reads this file once, the first time the machine boots, and turns a
+# plain Ubuntu install into a slightly safer one. Each top-level key below is a
+# "module". cloud-init runs them in its own fixed order, not top to bottom:
+# users -> write_files -> packages -> runcmd (last).
+#
+# On Lambda you pass a file just like this one when launching through their API.
+
+hostname: hardened
+
+# --- 1. Who can log in -------------------------------------------------------
+users:
+  - default                         # keeps Multipass's own "ubuntu" user so `multipass shell` works
+  - name: learner
+    gecos: Exercise user
+    shell: /bin/bash
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"  # fine for a practice VM; a real server would be stricter
+    lock_passwd: true               # no password at all: your SSH key is the only way in
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__          # replaced with your public key (see README step 4)
+
+ssh_pwauth: false                   # cloud-init's own switch for SSH password login
+
+# --- 2. Software ---------------------------------------------------------------
+package_update: true                # refresh the list of available packages
+package_upgrade: true               # install every pending update, security fixes included
+packages:
+  - ufw                             # simple firewall front end
+  - unattended-upgrades             # keeps installing security updates automatically
+
+# --- 3. Config files -----------------------------------------------------------
+# Each file is created owned by root, readable by everyone, writable only by root
+# (cloud-init's default, permission "0644").
+write_files:
+  # SSH: keys only, never root. Files in sshd_config.d are read in name order and
+  # the FIRST value set wins, so "10-" beats the "50-"/"60-" files Ubuntu ships.
+  - path: /etc/ssh/sshd_config.d/10-hardening.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      MaxAuthTries 3
+      X11Forwarding no
+      AllowUsers learner ubuntu
+
+  # Check for and install security updates every day.
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# --- 4. Commands, run last ---------------------------------------------------
+runcmd:
+  # Firewall: block everything coming in except SSH.
+  - ufw default deny incoming
+  - ufw default allow outgoing      # still wide open; a later exercise closes this
+  - ufw allow OpenSSH
+  - ufw --force enable
+  # Make SSH pick up the new rules (does nothing if SSH isn't running yet).
+  - systemctl try-reload-or-restart ssh
+
+final_message: "Exercise 1 setup finished after $UPTIME seconds"
