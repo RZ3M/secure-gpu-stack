@@ -1,0 +1,19 @@
+E1029 22:05:37.096245    5514 slow_operation_alarm.cc:74] Constant folding an instruction is taking > 1s:
+
+  %conv_general_dilated.0 = f32[128,64,3,3]{3,2,1,0} convolution(%constant.2, %broadcast_in_dim.1), window={size=56x56 pad=1_1x1_1}, dim_labels=fb01_io01->fb01, metadata={op_name="jit(<lambda>)/transpose(jvp(jit(<lambda>)))/conv_general_dilated" stack_frame_id=5}
+
+This isn't necessarily a bug; constant-folding is inherently a trade-off between compilation time and speed at runtime. XLA has some guards that attempt to keep constant folding from taking too long, but fundamentally you'll always be able to come up with an input program that takes a long time.
+
+If you'd like to file a bug, run with envvar XLA_FLAGS=--xla_dump_to=/tmp/foo and attach the results.
+E1029 22:05:37.405347    5419 slow_operation_alarm.cc:141] The operation took 1.309212375s
+Constant folding an instruction is taking > 1s:
+
+  %conv_general_dilated.0 = f32[128,64,3,3]{3,2,1,0} convolution(%constant.2, %broadcast_in_dim.1), window={size=56x56 pad=1_1x1_1}, dim_labels=fb01_io01->fb01, metadata={op_name="jit(<lambda>)/transpose(jvp(jit(<lambda>)))/conv_general_dilated" stack_frame_id=5}
+
+This isn't necessarily a bug; constant-folding is inherently a trade-off between compilation time and speed at runtime. XLA has some guards that attempt to keep constant folding from taking too long, but fundamentally you'll always be able to come up with an input program that takes a long time.
+
+If you'd like to file a bug, run with envvar XLA_FLAGS=--xla_dump_to=/tmp/foo and attach the results.
+jax 0.12.0.1 devices [CudaDevice(id=0)]
+matmul bf16 61.3 TFLOP/s
+conv + grad ok (8, 128, 56, 56) (128, 64, 3, 3)
+PASS jax

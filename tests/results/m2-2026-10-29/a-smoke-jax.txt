@@ -1,0 +1,19 @@
+2026-10-29 22:38:09.206201: E external/xla/xla/service/slow_operation_alarm.cc:73] Constant folding an instruction is taking > 1s:
+
+  %convolution.0 = f32[128,64,3,3]{3,2,1,0} convolution(%constant.1, %broadcast.3), window={size=56x56 pad=1_1x1_1}, dim_labels=fb01_io01->fb01, metadata={op_name="jit(<lambda>)/jit(main)/transpose(jvp(jit(<lambda>)))/conv_general_dilated" source_file="/home/ubuntu/t/gpu-smoke.py" source_line=96}
+
+This isn't necessarily a bug; constant-folding is inherently a trade-off between compilation time and speed at runtime. XLA has some guards that attempt to keep constant folding from taking too long, but fundamentally you'll always be able to come up with an input program that takes a long time.
+
+If you'd like to file a bug, run with envvar XLA_FLAGS=--xla_dump_to=/tmp/foo and attach the results.
+2026-10-29 22:38:09.778410: E external/xla/xla/service/slow_operation_alarm.cc:140] The operation took 1.572434038s
+Constant folding an instruction is taking > 1s:
+
+  %convolution.0 = f32[128,64,3,3]{3,2,1,0} convolution(%constant.1, %broadcast.3), window={size=56x56 pad=1_1x1_1}, dim_labels=fb01_io01->fb01, metadata={op_name="jit(<lambda>)/jit(main)/transpose(jvp(jit(<lambda>)))/conv_general_dilated" source_file="/home/ubuntu/t/gpu-smoke.py" source_line=96}
+
+This isn't necessarily a bug; constant-folding is inherently a trade-off between compilation time and speed at runtime. XLA has some guards that attempt to keep constant folding from taking too long, but fundamentally you'll always be able to come up with an input program that takes a long time.
+
+If you'd like to file a bug, run with envvar XLA_FLAGS=--xla_dump_to=/tmp/foo and attach the results.
+jax 0.6.0 devices [CudaDevice(id=0)]
+matmul bf16 60.3 TFLOP/s
+conv + grad ok (8, 128, 56, 56) (128, 64, 3, 3)
+PASS jax

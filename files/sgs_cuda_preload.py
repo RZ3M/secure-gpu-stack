@@ -7,7 +7,8 @@ TensorFlow's CUDA 12 wheels in their own hash-locked folder, /opt/sgs/tf-cuda12.
 
 TensorFlow opens these libraries by name, and its own search path doesn't
 reach that folder (it doesn't even reach its cuSOLVER wheel in a normal
-install). Left alone, it quietly falls back to the CPU, or picks up whatever
+install). Its XLA compiler doesn't find the folder's ptxas either; see
+_point_xla_at_cuda12. Left alone, it quietly falls back to the CPU, or picks up whatever
 copy is on the system path: Ubuntu's CUDA 12.0 libraries, or the CUDA 13 cuDNN
 the stack installs system-wide. On the krabs test bench that cost TensorFlow
 the GPU, then broke every GPU convolution.
@@ -52,6 +53,21 @@ def _preload():
         pending = failed
 
 
+def _point_xla_at_cuda12():
+    """TensorFlow's XLA compiler (Keras model.fit uses it) runs ptxas and reads
+    libdevice from a CUDA folder it looks for itself: PATH, /usr/local/cuda, or
+    a CUDA 12 wheel next to tensorflow, never this folder. With no system CUDA
+    toolkit (--no-cuda-toolkit) it finds none, and every compiled convolution
+    fails ("Autotuner could not compile any configs"); with one, it uses that
+    toolkit's CUDA 13 tools instead of TensorFlow's own. Found on M2 (RTX
+    3080). XLA_FLAGS is inherited by child processes; JAX tolerates it (tested
+    on M2). A --xla_gpu_cuda_data_dir the user set wins."""
+    nvcc = os.path.join(_TF_CUDA, "nvidia", "cuda_nvcc")
+    flags = os.environ.get("XLA_FLAGS", "")
+    if "--xla_gpu_cuda_data_dir" not in flags and os.path.isfile(os.path.join(nvcc, "bin", "ptxas")):
+        os.environ["XLA_FLAGS"] = (flags + " --xla_gpu_cuda_data_dir=" + nvcc).strip()
+
+
 class _PreloadingLoader:
     """Wraps tensorflow's real loader; preloads only when the module executes."""
 
@@ -65,6 +81,7 @@ class _PreloadingLoader:
         if self._finder in sys.meta_path:
             sys.meta_path.remove(self._finder)
             _preload()
+            _point_xla_at_cuda12()
         # From here on tensorflow looks like any normally imported package.
         module.__loader__ = module.__spec__.loader = self._loader
         self._loader.exec_module(module)

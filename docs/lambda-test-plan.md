@@ -5,6 +5,14 @@ x86-64, Lambda Cloud's own default image, and performance. This plan needs two
 instances of the same GPU type. A single-GPU instance is enough; budget about
 2 hours each.
 
+This plan has already run once, on M2: an RTX 3080 handed to two Ubuntu 24.04
+VMs (`docs/m2-test-bench.md`, scripts in `tests/gpu-vm/`). The driver path,
+all three frameworks, the speed comparison and the attack demo passed there.
+What's left needs Lambda itself: its cloud image, data-center GPUs and
+multi-GPU NCCL. Lambda's published install script no longer works on a fresh
+Ubuntu 24.04 (Lambda Stack finding 15), so instance A has to use Lambda's
+image, as planned below.
+
 | Instance | Image | Purpose |
 |---|---|---|
 | A, "before" | Lambda Stack 24.04 (Lambda's default) | Baseline: findings on the real cloud image |

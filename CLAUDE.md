@@ -141,6 +141,9 @@ TensorFlow and JAX in the system Python. Options:
 - **Python lockfiles:** `python/`. Regenerate with `python/lock.sh`, which needs
   uv. The lockfiles were generated in a Multipass VM.
 - **Local VM test:** `tests/test-local.sh`. Results land in `tests/results/`.
+- **GPU tests:** `tests/gpu-smoke.py` (PyTorch, JAX or TensorFlow, one per
+  process), `tests/gpu-bench.py` (training speed), `tests/jupyter-cell.py`
+  (runs a cell through the Jupyter tunnel, as a browser does).
 - **Release tarball and checksum:** `scripts/release.sh`. Signs `SHA256SUMS`
   when `SGS_SIGNING_KEY` points at an SSH ed25519 key (no real key exists yet).
 - **Open-weight model review harness:** `scripts/model-review.py` sends the
@@ -180,6 +183,24 @@ TensorFlow and JAX in the system Python. Options:
   - After a reboot (four for the Round G boot-path tests, 2026-10-29) it's back
     on Tailscale in about a minute, and the owner's services (ports 8765,
     9377) start on boot.
+- **Second GPU bench: M2** (added 2026-10-29). A desktop (Ryzen 9 5900X,
+  32 GB, RTX 3080 10 GB, Ampere, compute capability 8.6, driver 615.78)
+  running CachyOS (Arch), not Ubuntu, so `install.sh` can't run on it. It's for
+  GPU work that Pascal can't do. Reach it over Tailscale with
+  `ssh -i ~/.ssh/gpubox -o BatchMode=yes remote@M2 '...'`, Bash sandbox
+  disabled. Notes:
+  - It's someone's desktop: KDE runs on the GPU (about 1 GB of VRAM). Never
+    reboot it, stop display services, or change SSH, firewall, Tailscale or
+    sudo config without asking. Passwordless sudo; packages via
+    `sudo pacman -S --needed`. Long jobs go in `nohup` (no tmux installed).
+  - `~/sgs-smoke` holds the stack's pinned Python set (`lock-x86_64.txt`
+    plus `tf-cuda12`, hash-checked, Python 3.12 from uv), about 26 GB.
+  - **The full stack runs in Ubuntu 24.04 VMs with the RTX 3080 passed
+    through** (`~/sgs-vm`, scripts from `tests/gpu-vm/`; QEMU and edk2-ovmf
+    installed with pacman). VM `b` is Secure GPU Stack, `a` the Lambda Stack
+    baseline; both are stopped, disks kept. `sudo ./gpu-handoff.sh to-vm`
+    ends jm's desktop session (ask the user first, every time), `to-host`
+    brings it back. Write-up: `docs/m2-test-bench.md`.
 
 ## Status
 
@@ -302,9 +323,16 @@ TensorFlow and JAX in the system Python. Options:
   assets of the v0.1.0 GitHub release, not tracked in git.
 - [x] Pushed to GitHub (2026-10-29): public repository
   `RZ3M/secure-gpu-stack`, both branches, default branch `stack/v0.1`.
-- [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: the driver path
-  on Turing or newer, PyTorch convolutions and NCCL with the separated CUDA 12
-  libraries, Lambda's cloud image, performance. This is waiting for the user to
+- [x] M2 test bench (2026-10-29): the Lambda test plan on an RTX 3080 in
+  Ubuntu 24.04 VMs. Published v0.1.0 via cloud-init: open driver, lockdown,
+  all three frameworks on the GPU. Findings 77–81, all fixed, not committed:
+  TensorFlow convolutions broken by mixed cuDNN builds, apport undoing
+  `suid_dumpable=0` at boot, XLA without ptxas, GPU test matmul-only, IPython
+  README false positive. B 56 PASS / 0 WARN; Lambda Stack 19 PASS / 17 WARN
+  on the same GPU and driver, within 2% on speed. Lambda's own install fails
+  on a fresh 24.04 (Lambda Stack finding 15).
+- [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: Lambda's cloud
+  image, data-center GPUs, multi-GPU NCCL. This is waiting for the user to
   provide a Lambda environment.
 - [ ] v0.2 candidates are listed at the end of `docs/design.md`.
 

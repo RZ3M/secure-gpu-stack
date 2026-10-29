@@ -1,0 +1,9 @@
+1594f8d396e462e4ac19c7ddc10ea795ca2ec2b103c9852ef9eddab0be87758f  install-lambda-stack.sh
+e6c76c40ae45dc27ce107cd8a12d5717e8bc0913288fc9a02a5303403dd6d9da  install-lambda-stack-580.sh
+13c13
+< DRIVER_SERIES=570
+---
+> DRIVER_SERIES=580
+Package: /-580-server/
+Pin: release o=Ubuntu
+Pin-Priority: 1002

@@ -26,6 +26,8 @@ still has to be checked on a real instance; see "Not yet verified" at the end.
 | 11 | Any user can load terminal line-discipline modules, and ICMP redirects are accepted | Low | Verified (baseline VM) |
 | 12 | SSH allows X11 forwarding | Low | Verified (baseline VM) |
 | 13 | Nothing stops ordinary users or containers from reaching cloud metadata | Medium | Verified (baseline VM); whether Lambda serves metadata there isn't |
+| 14 | Kernel lockdown is off | Low | Verified (baseline VM, and M2 with a GPU) |
+| 15 | The one-line install leaves a current Ubuntu 24.04 without a GPU driver | High | Verified (M2, RTX 3080 in a VM) |
 
 ## 1. Lambda's apt pin blocks Ubuntu's NVIDIA driver security updates
 
@@ -231,6 +233,50 @@ Lambda's instances boot with Secure Boot needs an instance; cloud VMs
 usually don't. Secure GPU Stack sets `lockdown=integrity` when Secure Boot
 doesn't (krabs test-bench finding 72).
 
+## 15. The one-line install leaves a current Ubuntu 24.04 without a GPU driver
+
+**What happens.** On a fresh Ubuntu 24.04.5 cloud image (kernel
+6.8.0-147-generic, the current GA kernel) with an RTX 3080 passed through,
+`install-lambda-stack.sh` (SHA-256 `1594f8d3…`) picks `nvidia-headless-570-open`.
+The pin (finding 1) installs Lambda's 570.207, which DKMS has to compile on the
+machine, and the compile fails:
+
+```text
+nvidia/nv-pci.c:240:9: error: too few arguments to function 'pci_resize_resource'
+```
+
+This kernel declares `pci_resize_resource(dev, i, size, exclude_bars)`, and
+570.207 passes three arguments. The script stops there (`set -eu`), before
+`lambda-stack-cuda`: no driver and no frameworks.
+
+**Lambda's newer driver fails too.** With the script's one hard-coded number
+changed to `DRIVER_SERIES=580`, Lambda's 580.119.02 fails the same way
+(`nv-pci.c:232`). Ubuntu's own builds work: 580.178.04, in `noble-security`,
+comes with prebuilt, signed modules for this kernel, and it's what Secure GPU
+Stack installs. Ubuntu's 570 packages (570.211.01) have become transitional
+packages that pull in R580. The pin picks Lambda's older builds over all of
+them.
+
+**Impact.**
+- The documented install fails on a current Ubuntu 24.04 machine.
+- Likely, not tested: a Lambda Stack machine that gets this kernel from
+  automatic updates rebuilds the module with DKMS, the build fails, and after
+  the next reboot the new kernel has no NVIDIA driver. Confirming it needs a
+  Lambda Stack machine on an older kernel.
+
+**Reproduce.** On a fresh Ubuntu 24.04 machine with an NVIDIA GPU, on kernel
+6.8.0-147:
+
+```bash
+wget -nv -O- https://lambda.ai/install-lambda-stack.sh | I_AGREE_TO_THE_CUDNN_LICENSE=1 sh -
+```
+
+```bash
+sudo grep ': error:' /var/lib/dkms/nvidia/*/build/make.log
+```
+
+Found on the M2 test bench (`docs/m2-test-bench.md`).
+
 ## Not yet verified (needs a real Lambda instance)
 
 - Whether JupyterLab on the default image is reachable from the internet, and
@@ -240,8 +286,10 @@ doesn't (krabs test-bench finding 72).
 - Lambda's documented failure of `apt full-upgrade` on 24.04 images. It's likely
   related to finding 1.
 - Open ports and firewall state on a freshly launched instance.
-- Whether the GPU device files are 0666 (Ubuntu's default), and stay so after
-  `sudo nvidia-smi`: the baseline VM has no GPU.
+- Whether the GPU device files are 0666 on Lambda's own image. With Lambda
+  Stack installed and a real GPU (M2, `docs/m2-test-bench.md`) they are, and
+  they stay so after `sudo nvidia-smi`: `nobody` ran `nvidia-smi` and
+  allocated GPU memory.
 - Whether instances boot with Secure Boot, and so with kernel lockdown
   (finding 14).
 

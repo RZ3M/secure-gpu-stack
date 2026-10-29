@@ -31,10 +31,11 @@ gets everything Lambda Stack gives them, with every problem in
 | 5 | Every third-party package source uses HTTPS and a key scoped to that source, with its fingerprint verified at install | `sgs-check` |
 | 6 | Nothing reachable from the network except SSH. Jupyter is reached through an SSH tunnel, and Docker-published ports don't bypass the firewall | `sgs-check` plus an attack demo |
 | 7 | The stack's Python packages are hash-verified wheels only: no running of package build scripts. (Users' own `sgs-venv` environments install whatever they choose.) | Installer, `sgs-check` file integrity check |
-| 8 | ML code that runs on Lambda Stack runs here, at the same speed | GPU smoke test and benchmark (needs a real Lambda GPU); on krabs, the hardening itself costs no measurable speed (GPU matmul −0.5%, DataLoader within noise, in the sandboxed Jupyter kernel) |
+| 8 | ML code that runs on Lambda Stack runs here, at the same speed | GPU smoke test and benchmark (`tests/gpu-smoke.py`, `tests/gpu-bench.py`). On M2's RTX 3080, with the same driver, within 2% of Lambda Stack (slightly ahead); on krabs, the hardening itself costs no measurable speed (GPU matmul −0.5%, DataLoader within noise, in the sandboxed Jupyter kernel) |
 
 Criteria 1–7 are tested on local VMs first. Criterion 8 and the GPU parts of 1
-need the real Lambda environment.
+are tested on M2 (an RTX 3080 in a VM, the way Lambda instances get their
+GPU), and still need confirming on Lambda's own data-center GPUs.
 
 ## How it compares
 
@@ -80,8 +81,24 @@ verified (on krabs, or on a VM where krabs can't show it), plus a few
 properties confirmed (GPU memory is cleared between processes); see
 [docs/krabs-test-bench.md](docs/krabs-test-bench.md).
 
-Full output is in `tests/results/`. PyTorch and JAX on a current GPU, Lambda's
-cloud image and the performance comparison still need a Lambda instance; see
+**Modern GPU: the M2 test bench** (an RTX 3080, Ampere, handed to Ubuntu
+24.04 VMs, the way a Lambda instance gets its GPU). Both stacks on the same
+card and the same driver:
+
+| Test | Lambda Stack | Secure GPU Stack |
+|---|---|---|
+| Install on a fresh Ubuntu 24.04 | **Fails**: neither of Lambda's drivers compiles on the current kernel ([finding 15](docs/lambda-stack-findings.md)) | 8 minutes, unattended, from the published release |
+| `sgs-check --gpu-test` | 19 PASS, **17 WARN**, 2 SKIP (plus one WARN from the baseline's driver workaround) | 56 PASS, **0 WARN**, 0 SKIP |
+| PyTorch, JAX, TensorFlow on the GPU, convolutions included | Yes (`torch.compile` fails: no `python3-dev`) | Yes, `torch.compile` too |
+| GPU device files | Open to every account: `nobody` ran `nvidia-smi` | Video group only, locked |
+| Training speed (ResNet-50, GPT-style) | 902 images/s, 63,465 tokens/s | 919 images/s, 63,948 tokens/s |
+
+M2 also found five more bugs and blind spots, all fixed, among them
+TensorFlow convolutions that failed on any GPU new enough to run them; see
+[docs/m2-test-bench.md](docs/m2-test-bench.md).
+
+Full output is in `tests/results/`. Lambda's cloud image, data-center GPUs
+and multi-GPU NCCL still need a Lambda instance; see
 [docs/lambda-test-plan.md](docs/lambda-test-plan.md).
 
 ## Quick start

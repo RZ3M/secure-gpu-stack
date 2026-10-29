@@ -1,0 +1,26 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1793311538.946522    5608 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+I0000 00:00:1793311542.178369    5608 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 8108 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3080, pci bus id: 0000:01:00.0, compute capability: 8.6
+W0000 00:00:1793311542.287019    5608 cpu_allocator_impl.cc:82] Allocation of 268435456 exceeds 10% of free system memory.
+I0000 00:00:1793311543.211826    5608 cuda_dnn.cc:461] Loaded cuDNN version 92700
+
+W0000 00:00:1793311543.229260    5608 op_kernel.cc:1858] OP_REQUIRES failed at conv_ops_impl.h:1204 : UNKNOWN: <unknown cudnn status: 1008>
+in external/xla/xla/stream_executor/cuda/cuda_dnn.cc(2859): 'tensor' CUDNN_BACKEND_TENSOR_DESCRIPTOR cudnnFinalize failedptrDesc->finalize()
+W0000 00:00:1793311543.229290    5608 local_rendezvous.cc:412] Local rendezvous is aborting with status: UNKNOWN: <unknown cudnn status: 1008>
+in external/xla/xla/stream_executor/cuda/cuda_dnn.cc(2859): 'tensor' CUDNN_BACKEND_TENSOR_DESCRIPTOR cudnnFinalize failedptrDesc->finalize()
+tensorflow 2.21.0 gpus [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+matmul fp32/tf32 25.1 TFLOP/s
+Traceback (most recent call last):
+  File "/home/ubuntu/t/gpu-smoke.py", line 129, in <module>
+    {"torch": run_torch, "jax": run_jax, "tf": run_tf}[sys.argv[1]]()
+  File "/home/ubuntu/t/gpu-smoke.py", line 118, in run_tf
+    err = tf.reduce_max(tf.abs(tf.nn.conv2d(x, w, 1, "SAME") - ref)).numpy()
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/sgs/venv/lib/python3.12/site-packages/tensorflow/python/util/traceback_utils.py", line 167, in error_handler
+    raise e.with_traceback(filtered_tb) from None
+  File "/opt/sgs/venv/lib/python3.12/site-packages/tensorflow/python/framework/ops.py", line 6027, in raise_from_not_ok_status
+    raise core._status_to_exception(e) from None  # pylint: disable=protected-access
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tensorflow.python.framework.errors_impl.UnknownError: {{function_node __wrapped__Conv2D_device_/job:localhost/replica:0/task:0/device:GPU:0}} <unknown cudnn status: 1008>
+in external/xla/xla/stream_executor/cuda/cuda_dnn.cc(2859): 'tensor' CUDNN_BACKEND_TENSOR_DESCRIPTOR cudnnFinalize failedptrDesc->finalize() [Op:Conv2D] name: 

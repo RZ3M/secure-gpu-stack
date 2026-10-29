@@ -1,0 +1,81 @@
+
+== Machine
+  Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic, amd64
+  NVIDIA GPUs: 1
+  Stack: Lambda Stack
+
+== Package sources
+  [WARN] archive.lambdalabs.com: plain HTTP, key not limited to this source
+  [WARN] lambda-keyring.gpg is trusted for every repository, not just its own
+  [WARN] Pin at 1001 overrides other sources and allows downgrades: /etc/apt/preferences.d/lambda-repository
+  [WARN] Pin at 1002 overrides other sources and allows downgrades: /etc/apt/preferences.d/m2-baseline-ubuntu-driver
+         
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [PASS] Driver branch R580 is supported by NVIDIA until 2028-06
+  [PASS] Driver is the newest build Ubuntu offers
+  [PASS] GPU performance counters are admin-only
+  [PASS] NVIDIA kernel module is signed (Canonical Ltd. Kernel Module Signing)
+         
+  [WARN] GPU device files are open to every local user: /dev/nvidia-modeset /dev/nvidia-uvm-tools /dev/nvidia-uvm /dev/nvidia0 /dev/nvidiactl (the stack manages the ones CUDA uses: /usr/local/sbin/sgs-gpu-devices)
+
+== Containers
+  [SKIP] NVIDIA Container Toolkit not installed
+  [SKIP] Docker not installed
+
+== Python ML stack
+         Stack is mixed into the OS's own Python (/usr/lib/python3/dist-packages)
+         torch 2.7.0   tensorflow 2.19.0   keras 3.10.0   jax 0.6.0
+  [PASS] Stack packages are read-only for users
+  [PASS] Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root
+  [WARN] System CUDA libraries can override the stack's: libcublas.so.12 libcublasLt.so.12 libcudart.so.12 libcufft.so.11 libcurand.so.10 libcusolver.so.11 libcusparse.so.12 libnvJitLink.so.12 libnvrtc.so.12
+         Usually Ubuntu's nvidia-cuda-toolkit: sudo apt purge nvidia-cuda-toolkit && sudo apt autoremove
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [WARN] 44 vulnerability advisories in 3 of 118 Python packages
+           keras 3.10.0: 28  (lambda package)
+           torch 2.7.0: 15  (lambda package)
+           fsspec 2024.3.1: 1  (lambda package)
+         Not counted: 205 matches in 23 packages Ubuntu maintains (Ubuntu often fixes these without changing the version)
+  [PASS] The driver, CUDA, cuDNN, NCCL and container files match their packages (44 packages)
+
+== Network exposure
+  [PASS] Only SSH listens on the network
+         UDP listeners (blocked by the firewall's default deny): 10.0.2.15%enp0s1:68 
+         JupyterLab isn't running
+  [WARN] Nothing stops ordinary users or containers from reaching the cloud metadata address (169.254.169.254)
+  [WARN] Firewall is off: every listening program is reachable
+
+== Kernel and audit
+  [WARN] Kernel hardening settings loosened: kernel.io_uring_disabled=0 dev.tty.ldisc_autoload=1 fs.suid_dumpable=2 net.ipv4.conf.all.accept_redirects=1 net.ipv4.conf.default.accept_redirects=1 net.ipv4.conf.enp0s1.accept_redirects=1 net.ipv4.conf.all.send_redirects=1 net.ipv4.conf.default.send_redirects=1 (and more)
+  [WARN] Kernel lockdown is off: root can load unsigned kernel modules and write kernel memory, a rootkit's way in
+  [WARN] Ordinary users can create user namespaces: through aa-exec -p 1password (kernel.apparmor_restrict_unprivileged_*)
+  [WARN] auditd isn't installed: changes leave no audit trail
+
+== Secrets
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+         Recorded 237 startup files to watch for changes (cron, services, startup files, login hooks, SSH keys)
+
+== SSH
+  [PASS] Password login is off
+  [WARN] Root login allowed (without-password)
+  [WARN] X11 forwarding is on: whoever takes over this machine can reach the screen and keystrokes of users connected with ssh -X
+
+== Updates
+  [WARN] 9 security updates waiting to be installed
+         8 other (non-security) updates available
+  [PASS] Automatic security updates are on
+  [WARN] Automatic updates skip these packages: libnccl2 (lambdalabs.com / Lambda Labs Ubuntu repository (Noble))
+         Automatic updates haven't completed a run yet
+  [WARN] apt's daily jobs have no time limit: apt-daily apt-daily-upgrade (one hung run can block every update)
+  [PASS] No reboot needed
+
+== GPU test
+         GPU 0: NVIDIA GeForce RTX 3080 (UUID: GPU-8e9b88ee-99cc-2b2d-5ec6-42a0d893407c)
+  [PASS] PyTorch 2.7.0: 24.3 TFLOP/s (fp32 matmul) on NVIDIA GeForce RTX 3080, convolution OK
+  [PASS] JAX 0.6.0: 32.1 TFLOP/s (fp32 matmul) on gpu, convolution OK
+  [PASS] TensorFlow 2.19.0: 17.1 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+
+== Result: 19 PASS, 18 WARN, 2 SKIP

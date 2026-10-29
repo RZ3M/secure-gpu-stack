@@ -358,6 +358,14 @@ EOF
   # The glob keys (every network interface) apply through systemd-sysctl.
   /usr/lib/systemd/systemd-sysctl /etc/sysctl.d/60-sgs.conf >/dev/null 2>&1 \
     || info "Couldn't apply every setting in /etc/sysctl.d/60-sgs.conf now; they apply at the next boot"
+  # apport, Ubuntu's crash reporter, writes fs.suid_dumpable=2 when it starts at
+  # boot, after systemd-sysctl: the pin lasted until the first reboot (M2 test
+  # bench, a fresh cloud image). Put 0 back once it has started; apport still
+  # collects ordinary crashes.
+  install -d -m 0755 /etc/systemd/system/apport.service.d
+  printf '[Service]\nExecStartPost=/usr/sbin/sysctl -q -w fs.suid_dumpable=0\n' \
+    > /etc/systemd/system/apport.service.d/sgs-suid-dumpable.conf
+  systemctl daemon-reload
   info "Kernel hardening settings pinned (/etc/sysctl.d/60-sgs.conf)"
 
   # Apply the security updates already waiting, instead of leaving them for
@@ -667,6 +675,17 @@ install_python() {
   # their own folder, and a hook loads them when tensorflow is imported.
   log "TensorFlow's CUDA 12 libraries in ${SGS_PREFIX}/tf-cuda12"
   make_venv "$SGS_PREFIX/tf-cuda12" "$SRC_DIR/python/tf-cuda12-lock-${PY_ARCH}.txt" target
+  # TensorFlow's cuDNN opens sub-libraries by their full version
+  # (libcudnn_graph.so.9.27.0), but the wheel names them only .so.9. Its own
+  # folder is searched first, so give the files those names too: otherwise the
+  # system-wide CUDA 13 cuDNN of the same version answers, the two builds mix,
+  # and every TensorFlow convolution fails ("cudnn status 1008", M2 test bench).
+  local cudnn_dir="$SGS_PREFIX/tf-cuda12/nvidia/cudnn/lib" cudnn_ver lib
+  cudnn_ver="$(sed -n 's/^Version: \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' "$SGS_PREFIX"/tf-cuda12/nvidia_cudnn_cu12-*.dist-info/METADATA)"
+  [ -n "$cudnn_ver" ] || die "Couldn't read the version of TensorFlow's cuDNN in $SGS_PREFIX/tf-cuda12"
+  for lib in "$cudnn_dir"/libcudnn*.so."${cudnn_ver%%.*}"; do
+    ln -sfn "${lib##*/}" "$lib.${cudnn_ver#*.}"
+  done
   local site
   site="$("$SGS_PREFIX/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
   install -m 0644 "$SRC_DIR/files/sgs_cuda_preload.py" "$SRC_DIR/files/sgs-cuda-preload.pth" "$site/"
@@ -779,7 +798,8 @@ write_manifest() {
            /etc/systemd/system/nvidia-cdi-refresh.service.d/sgs-gpu-devices.conf \
            /etc/systemd/system/sgs-gpu-devices.service /sbin/ub-device-create \
            /etc/systemd/system/nvidia-persistenced.service.d/sgs-gpu-devices.conf \
-           /etc/sysctl.d/60-sgs.conf /etc/audit/rules.d/60-sgs.rules /etc/update-motd.d/60-sgs \
+           /etc/sysctl.d/60-sgs.conf /etc/systemd/system/apport.service.d/sgs-suid-dumpable.conf \
+           /etc/audit/rules.d/60-sgs.rules /etc/update-motd.d/60-sgs \
            /etc/systemd/system/sgs-check.service /etc/systemd/system/sgs-check.timer \
            /usr/local/sbin/sgs-egress /etc/systemd/system/sgs-egress-dns.service /etc/systemd/system/sgs-egress.service \
            /etc/sgs/guard.nft /etc/systemd/system/sgs-guard.service /etc/default/grub.d/60-sgs-lockdown.cfg; do

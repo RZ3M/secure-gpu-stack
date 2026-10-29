@@ -62,7 +62,9 @@ STARTUP_SYSTEM="/etc/crontab /etc/cron.d/ /etc/cron.hourly/ /etc/cron.daily/ /et
   /usr/local/lib/python3*/dist-packages/sitecustomize.py"
 # ~/.ssh/rc runs at every SSH login; Python runs .pth files and
 # site/usercustomize from the user's site-packages at every start, IPython its
-# startup scripts in every notebook kernel, Jupyter its .py configuration at
+# startup scripts in every notebook kernel (only *.py and *.ipy: the README it
+# writes there itself on first start flagged every new Jupyter user, seen on
+# M2), Jupyter its .py configuration at
 # every server start; ~/.gitconfig can make git run any program
 # (core.fsmonitor, hooksPath); ~/.local/bin comes first on PATH (Ubuntu's
 # ~/.profile), so a "sudo" there would run whenever you type sudo.
@@ -70,8 +72,8 @@ STARTUP_HOME=".ssh/authorized_keys .ssh/authorized_keys2 .ssh/rc .ssh/environmen
   .bashrc .bash_aliases .profile .bash_profile .bash_login .bash_logout .zshenv .zshrc .zprofile
   .zlogin .config/fish/config.fish .gitconfig .config/git/config .pam_environment
   .local/lib/python3*/site-packages/*.pth .local/lib/python3*/site-packages/sitecustomize.py
-  .local/lib/python3*/site-packages/usercustomize.py .ipython/profile_default/startup/
-  .jupyter/*.py .jupyter/*.json .local/share/jupyter/kernels/ .config/systemd/user/
+  .local/lib/python3*/site-packages/usercustomize.py .ipython/profile_default/startup/*.py
+  .ipython/profile_default/startup/*.ipy .jupyter/*.py .jupyter/*.json .local/share/jupyter/kernels/ .config/systemd/user/
   .local/share/systemd/user/ .config/autostart/ .config/environment.d/ .local/bin/"
 STARTUP_RECORD=/var/lib/sgs/startup-files
 # A fingerprint line: hash, the watched place it's under, path. A symlink
@@ -1376,12 +1378,22 @@ fw, cc = sys.argv[1], os.environ.get("SGS_GPU_CC", "")
 # (Turing, 7.5+), TensorFlow 2.21 uses CUDA 12.5 (Pascal, 6.0+). Failing on an
 # older GPU is expected, so that's a SKIP, not a WARN.
 need = {"torch": (7, 5), "jax": (7, 5), "tensorflow": (6, 0)}[fw]
-too_old = bool(cc) and tuple(int(p) for p in cc.split(".")) < need
+version = tuple(int(p) for p in cc.split(".")) if cc else None
+too_old = bool(version) and version < need
+# Convolutions go through cuDNN, which a matmul never touches: on M2 a
+# TensorFlow that mixed two cuDNN builds multiplied matrices fine and failed
+# every convolution. cuDNN 9.27 has no convolution kernels before Turing (7.5),
+# so there a failed TensorFlow convolution is expected (krabs, a GTX 1070).
+conv_too_old = bool(version) and version < (7, 5)
 name = {"torch": "PyTorch", "jax": "JAX", "tensorflow": "TensorFlow"}[fw]
 N = 4096
+conv_err = None
 
 def tflops(t):
     return f"{10 * 2 * N**3 / t / 1e12:.1f} TFLOP/s (fp32 matmul)"
+
+def first_line(e):
+    return (str(e).strip().splitlines() or [type(e).__name__])[0][:160]
 
 try:
     if fw == "torch":
@@ -1391,6 +1403,12 @@ try:
         for _ in range(10): a @ a
         torch.cuda.synchronize()
         on_gpu, detail = True, f"{tflops(time.time() - t)} on {torch.cuda.get_device_name(0)}"
+        try:
+            c = torch.nn.functional.conv2d(torch.randn(16, 64, 56, 56, device="cuda"),
+                                           torch.randn(64, 64, 3, 3, device="cuda"), padding=1)
+            if not (c.is_cuda and bool(torch.isfinite(c).all())): conv_err = "no valid result on the GPU"
+        except Exception as e:
+            conv_err = first_line(e)
     elif fw == "jax":
         import jax, jax.numpy as jnp
         name = f"JAX {jax.__version__}"
@@ -1399,6 +1417,12 @@ try:
         y.block_until_ready()
         platform = next(iter(y.devices())).platform
         on_gpu, detail = platform == "gpu", f"{tflops(time.time() - t)} on {platform}"
+        try:
+            c = jax.lax.conv(jnp.ones((16, 64, 56, 56)), jnp.ones((64, 64, 3, 3)), (1, 1), "SAME")
+            c.block_until_ready()
+            if next(iter(c.devices())).platform != "gpu": conv_err = "ran off the GPU"
+        except Exception as e:
+            conv_err = first_line(e)
     else:
         import tensorflow as tf
         name = f"TensorFlow {tf.__version__}"
@@ -1409,11 +1433,22 @@ try:
             for _ in range(10): y = tf.linalg.matmul(a, a)
             y.numpy()
         on_gpu, detail = "GPU" in y.device, f"{tflops(time.time() - t)} on {y.device.split('/')[-1]}"
+        try:
+            with tf.device("/GPU:0"):
+                c = tf.nn.conv2d(tf.random.normal((16, 56, 56, 64)), tf.random.normal((3, 3, 64, 64)), 1, "SAME")
+                c.numpy()
+            if "GPU" not in c.device: conv_err = "ran off the GPU"
+        except Exception as e:
+            conv_err = first_line(e)
 except Exception as e:
-    on_gpu, detail = False, (str(e).strip().splitlines() or [type(e).__name__])[0][:160]
+    on_gpu, detail = False, first_line(e)
 
-if on_gpu:
-    print(f"PASS|{name}: {detail}")
+if on_gpu and conv_err is None:
+    print(f"PASS|{name}: {detail}, convolution OK")
+elif on_gpu and conv_too_old:
+    print(f"SKIP|{name}: {detail}, but convolutions can't run on this GPU (compute capability {cc}; cuDNN 9.27 needs 7.5+)")
+elif on_gpu:
+    print(f"WARN|{name} matrix multiply works ({detail}) but a convolution failed: {conv_err}")
 elif too_old:
     print(f"SKIP|{name} can't use this GPU (compute capability {cc}; its CUDA build needs {need[0]}.{need[1]}+)")
 else:

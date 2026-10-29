@@ -1,0 +1,3 @@
+{"torch": "2.15.0+cu132", "cuda": "13.2", "cudnn": 92600, "gpu": "NVIDIA GeForce RTX 3080", "matmul_bf16_tflops": 66.7, "resnet50_img_per_s": 907, "gpt_tokens_per_s": 63014, "peak_gpu_mem_gib": 6.0}
+{"torch": "2.15.0+cu132", "cuda": "13.2", "cudnn": 92600, "gpu": "NVIDIA GeForce RTX 3080", "matmul_bf16_tflops": 66.0, "resnet50_img_per_s": 903, "gpt_tokens_per_s": 62912, "peak_gpu_mem_gib": 6.0}
+{"torch": "2.15.0+cu132", "cuda": "13.2", "cudnn": 92600, "gpu": "NVIDIA GeForce RTX 3080", "matmul_bf16_tflops": 65.8, "resnet50_img_per_s": 904, "gpt_tokens_per_s": 62704, "peak_gpu_mem_gib": 6.0}

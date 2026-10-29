@@ -1,0 +1,14 @@
+== Reaching the machine
+Warning: Permanently added '[127.0.0.3]:2222' (ED25519) to the list of known hosts.
+  [PASS] SSH with the key works, so the machine is reachable from here
+== Jupyter
+  [PASS] JupyterLab is not reachable directly on 127.0.0.3:8888
+channel 2: open failed: connect failed: open failed
+  [FAIL] JupyterLab not reachable through the tunnel (HTTP 000)
+  [PASS] another account on the machine (nobody) can't reach JupyterLab at all
+== SSH
+  [PASS] the server only offers key logins (publickey)
+  [FAIL] root login over SSH is allowed (PermitRootLogin without-password)
+== Docker-published ports
+sudo: docker: command not found
+  [FAIL] couldn't start the demo containers

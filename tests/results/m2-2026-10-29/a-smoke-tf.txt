@@ -1,0 +1,20 @@
+2026-10-29 22:38:10.907673: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1793313490.918948   10546 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1793313490.922617   10546 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1793313490.931647   10546 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1793313490.931659   10546 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1793313490.931661   10546 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1793313490.931662   10546 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+I0000 00:00:1793313494.187333   10546 gpu_device.cc:2019] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 8108 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3080, pci bus id: 0000:01:00.0, compute capability: 8.6
+I0000 00:00:1793313495.237175   10546 cuda_dnn.cc:529] Loaded cuDNN version 90800
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1793313496.202832   10583 service.cc:152] XLA service 0x734dc1869e50 initialized for platform CUDA (this does not guarantee that XLA will be used). Devices:
+I0000 00:00:1793313496.202848   10583 service.cc:160]   StreamExecutor device (0): NVIDIA GeForce RTX 3080, Compute Capability 8.6
+2026-10-29 22:38:16.233053: I tensorflow/compiler/mlir/tensorflow/utils/dump_mlir_util.cc:269] disabling MLIR crash reproducer, set env var `MLIR_CRASH_REPRODUCER_DIRECTORY` to enable.
+I0000 00:00:1793313496.695433   10583 device_compiler.h:188] Compiled cluster using XLA!  This line is logged at most once for the lifetime of the process.
+tensorflow 2.19.0 gpus [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+matmul fp32/tf32 25.1 TFLOP/s
+conv2d GPU vs CPU max abs diff 1.37e-04
+keras fit ok, loss 2.311
+PASS tf

@@ -1148,7 +1148,9 @@ Other tests, all on krabs:
 - **Each framework loads its own CUDA libraries.** PyTorch reports cuDNN 9.26,
   its CUDA 13 wheel; before the fix it would have loaded TensorFlow's 9.27.
   A TensorFlow process maps cuDNN, cuSOLVER and NCCL only from
-  `/opt/sgs/tf-cuda12`. The same holds in a user's own `sgs-venv`
+  `/opt/sgs/tf-cuda12`. (Not when the system cuDNN has exactly the same
+  version: then cuDNN's sub-libraries came from it, and convolutions broke;
+  M2 finding 77, `docs/m2-test-bench.md`.) The same holds in a user's own `sgs-venv`
   environment. The hook adds no measurable Python startup time (10–20 ms
   either way).
 - **A clean arm64 VM upgraded from v0.1:** 27 PASS, 0 WARN, 1 SKIP (no GPU).

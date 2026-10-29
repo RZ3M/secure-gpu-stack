@@ -1,0 +1,42 @@
+== driver
+NVIDIA GeForce RTX 3080, 580.178.04, 8.6
+filename:       /lib/modules/6.8.0-147-generic/kernel/nvidia-580srv-open/nvidia.ko
+version:        580.178.04
+license:        Dual MIT/GPL
+== kernel
+6.8.0-147-generic
+[none] integrity confidentiality
+fs.suid_dumpable = 2
+kernel.io_uring_disabled = 0
+kernel.apparmor_restrict_unprivileged_userns = 1
+dev.tty.ldisc_autoload = 1
+== device files after boot
+crw-rw-rw- 1 root root 237,   0 Oct 29 22:33 /dev/nvidia-uvm
+crw-rw-rw- 1 root root 195,   0 Oct 29 22:33 /dev/nvidia0
+crw-rw-rw- 1 root root 195, 255 Oct 29 22:33 /dev/nvidiactl
+== after sudo nvidia-smi
+crw-rw-rw- 1 root root 237,   0 Oct 29 22:33 /dev/nvidia-uvm
+crw-rw-rw- 1 root root 195,   0 Oct 29 22:33 /dev/nvidia0
+crw-rw-rw- 1 root root 195, 255 Oct 29 22:33 /dev/nvidiactl
+== frameworks
+2.7.0 2.19.0 0.6.0 3.10.0
+libnccl2:amd64 2.26.2-0lambda1
+nvidia-cuda-toolkit 12.8.93~12.8.1-0lambda0.24.04.1
+python3-jax-cuda 0.6.0-0lambda0.24.04.1
+python3-jax-cuda12-pjrt 0.6.0-0lambda0.24.04.1
+python3-jax-cuda12-plugin 0.6.0-0lambda0.24.04.1
+python3-keras 3.10.0-0lambda1
+python3-tensorflow-cuda 2.19.0-0lambda0.24.04.2
+python3-torch-cuda 2.7.0+ds-0lambda0.24.04.1
+== groups and sudo
+uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),24(cdrom),27(sudo),30(dip),105(lxd)
+    (ALL : ALL) ALL
+    (ALL) NOPASSWD: ALL
+== ssh
+permitrootlogin without-password
+passwordauthentication no
+x11forwarding yes
+== firewall
+Status: inactive
+== apt full-upgrade -s
+17 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.

@@ -1,0 +1,73 @@
+== install log: headings, notes, warnings
+==> Checking this machine
+    Ubuntu 24.04 on amd64, kernel 6.8.0-147-generic (generic line)
+    NVIDIA GPUs found: 1
+    Jupyter user: ubuntu
+==> Adding package sources (HTTPS, each with its own verified key)
+    nvidia-cuda key verified: EB693B3035CD5710E231E123A4B469963BF863CC
+    docker key verified: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+==> Hardening SSH, the firewall and automatic updates
+    SSH: keys only, no root login
+    Firewall: incoming blocked except SSH
+    Automatic security updates (with time limits) and audit logging on
+    Kernel hardening settings pinned (/etc/sysctl.d/60-sgs.conf)
+    Pending security updates applied
+==> NVIDIA driver R580 from Ubuntu's archive
+    Installed: linux-headers-generic linux-modules-nvidia-580-server-open-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server
+    GPU device files: video group only (ubuntu added to video)
+    Kernel lockdown (integrity) turns on at the next boot
+==> CUDA toolkit, cuDNN and NCCL from NVIDIA's repository
+    Installed cuda-toolkit-13-0, cuDNN 9, NCCL 2.28.9-1+cuda13.0
+==> Docker Engine and the NVIDIA Container Toolkit
+    Docker 29.9.2, Container Toolkit 1.20.1
+    Container ports publish to 127.0.0.1 by default
+    Nobody is in the docker group; use sudo docker
+==> Python ML stack in /opt/sgs/venv (hash-verified wheels only)
+    jax==0.12.0.1 jupyterlab==4.6.4 keras==3.15.1 tensorflow==2.21.0 torch==2.15.0 
+==> TensorFlow's CUDA 12 libraries in /opt/sgs/tf-cuda12
+    Loaded for TensorFlow only (files/sgs_cuda_preload.py)
+==> Security tools in /opt/sgs/tools (pip-audit, modelscan)
+==> Commands and the Jupyter service
+    JupyterLab running for ubuntu on a private socket (sgs-jupyter shows how to connect)
+==> Audit rules for the machine's trust roots
+    23 rules in /etc/audit/rules.d/60-sgs.rules (read with: sudo ausearch -k sgs-)
+    Software bill of materials: /opt/sgs/sbom.cdx.json
+==> Secure GPU Stack 0.1.0 is installed
+    Check it:   sgs-check
+    Reboot to finish (the NVIDIA driver, kernel lockdown and their settings load at boot):   sudo reboot
+== driver
+NVIDIA GeForce RTX 3080, 580.178.04, 8.6, 10240 MiB, 4
+filename:       /lib/modules/6.8.0-147-generic/kernel/nvidia-580srv-open/nvidia.ko
+version:        580.178.04
+license:        Dual MIT/GPL
+linux-modules-nvidia-580-server-open-6.8.0-147-generic 6.8.0-147.147+1
+linux-modules-nvidia-580-server-open-generic 6.8.0-147.147+1
+nvidia-headless-no-dkms-580-server-open 580.178.04-0ubuntu0.24.04.1
+nvidia-utils-580-server 580.178.04-0ubuntu0.24.04.1
+no dkms
+== kernel
+6.8.0-147-generic
+none [integrity] confidentiality
+lockdown=integrity
+This system doesn't support Secure Boot
+== device files
+crw-rw---- 1 root video 195, 254 Oct 29 22:02 /dev/nvidia-modeset
+crw-rw---- 1 root video 237,   0 Oct 29 22:02 /dev/nvidia-uvm
+crw-rw---- 1 root video 237,   1 Oct 29 22:02 /dev/nvidia-uvm-tools
+crw-rw---- 1 root video 195,   0 Oct 29 22:02 /dev/nvidia0
+crw-rw---- 1 root video 195, 255 Oct 29 22:02 /dev/nvidiactl
+
+/dev/nvidia-caps:
+total 0
+cr-------- 1 root root 240, 1 Oct 29 22:02 nvidia-cap1
+cr--r--r-- 1 root root 240, 2 Oct 29 22:02 nvidia-cap2
+active
+== versions
+jax==0.12.0.1
+jaxlib==0.12.0.1
+jupyterlab==4.6.4
+keras==3.15.1
+tensorflow==2.21.0
+torch==2.15.0
+/usr/local/cuda/bin/ptxas
+Build cuda_13.0.r13.0/compiler.36424714_0
