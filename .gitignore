@@ -18,9 +18,11 @@ id_*
 dist/
 tests/results/*.log
 
-# The walkthrough video: build files and rendered videos (regenerate with video/render.mjs)
+# The videos: build files and rendered videos (regenerate with video/render.mjs)
 video/build/
 video/out/*.mp4
+video/m2/build/
+video/m2/out/*.mp4
 
 # Python bytecode
 __pycache__/

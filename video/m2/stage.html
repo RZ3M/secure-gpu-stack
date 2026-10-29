@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Secure GPU Stack: the M2 update</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+/* scene-specific */
+.gcard { height: 360px; padding: 30px 36px; }
+.gcard .gpu { font-size: 104px; margin-top: 20px; }
+.gcard .arch { font: 600 26px/1.3 var(--sans); color: var(--soft); margin-top: 14px; }
+.gcard .pills { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap; }
+.box { padding: 26px 30px; }
+.box .bt { font: 750 32px/1.15 var(--sans); }
+.box .bs { font: 500 21px/1.35 var(--sans); color: var(--mute); margin-top: 10px; }
+.arrow { font: 700 60px/1 var(--sans); color: var(--pass); }
+.stepr { height: 92px; display: flex; align-items: center; gap: 26px; border-bottom: 1px solid var(--line); }
+.stepr .no { width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--pass); color: var(--pass); display: flex; align-items: center; justify-content: center; font: 700 21px/1 var(--mono); flex: none; }
+.stepr .st { font: 700 30px/1.15 var(--sans); }
+.stepr .ss { font: 500 20px/1.3 var(--sans); color: var(--mute); margin-top: 6px; }
+.frow { height: 100px; display: flex; align-items: center; gap: 26px; border-bottom: 1px solid var(--line); position: relative; }
+.frow .fn { width: 64px; font: 700 26px/1 var(--mono); color: var(--warn); flex: none; }
+.frow .ft { font: 700 29px/1.15 var(--sans); }
+.frow .fs { font: 500 20px/1.3 var(--sans); color: var(--mute); margin-top: 6px; }
+.frow .stamp { right: 0; top: 26px; font-size: 21px; padding: 9px 13px 7px; border-width: 3px; }
+.crow { display: flex; align-items: flex-start; gap: 18px; margin-top: 20px; font: 600 25px/1.3 var(--sans); }
+.crow small { display: block; font: 500 19px/1.3 var(--sans); color: var(--mute); margin-top: 6px; }
+.sp { display: flex; align-items: center; gap: 16px; margin-top: 16px; }
+.sp .sl { width: 230px; font: 600 21px/1.2 var(--sans); color: var(--soft); flex: none; }
+.sp .sb { height: 30px; border-radius: 6px; width: 0; }
+.sp .sv { font: 700 24px/1 var(--mono); }
+.todo { height: 108px; display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--line); }
+.todo .bx { width: 34px; height: 34px; border-radius: 8px; border: 3px solid var(--warn); flex: none; display: flex; align-items: center; justify-content: center; font: 800 22px/1 var(--sans); }
+.todo.done .bx { border-color: var(--pass); background: rgba(61,220,151,.16); color: var(--pass); }
+.todo .tt { font: 700 29px/1.15 var(--sans); }
+.todo .ts { font: 500 20px/1.3 var(--sans); color: var(--mute); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="glow"></div>
+<div id="vig"></div>
+<div id="stage"></div>
+<div id="hud">
+  <div class="wm"><svg width="30" height="30" viewBox="0 0 200 200" class="logo" style="stroke-dasharray:none"><rect x="50" y="50" width="100" height="100" rx="16" style="stroke-dasharray:none;stroke-width:12"/><path style="stroke-dasharray:none;stroke-width:12" d="M100 70L125 80V100C125 116 114 126 100 131C86 126 75 116 75 100V80Z"/><path style="stroke-dasharray:none;stroke-width:10;stroke:#2E9F70" d="M66 50V28M100 50V28M134 50V28M66 150V172M100 150V172M134 150V172M50 66H28M50 100H28M50 134H28M150 66H172M150 100H172M150 134H172"/></svg>SECURE GPU STACK</div>
+  <div class="ch"><b></b><span></span></div>
+</div>
+<div id="cap"><span></span></div>
+<div id="prog"><i></i></div>
+
+<script src="script.js"></script>
+<script src="build/timeline.js"></script>
+<script src="../kit.js"></script>
+<script>
+// ---------- scenes ----------
+def('title', [61, 220, 151], (R, S) => {
+  const L = A(R, 850, 140, `<div>${LOGO(220)}</div>`, 220, true);
+  const svg = L.querySelector('svg');
+  const ttl = A(R, 0, 410, `<div style="text-align:center;font:800 132px/1 var(--sans);letter-spacing:-.035em">Secure GPU Stack</div>`, 1920);
+  const ver = A(R, 0, 580, `<div style="text-align:center"><span class="pill ok" style="font-size:25px;padding:13px 22px 12px">v0.1.1 · the M2 update</span></div>`, 1920);
+  const sub = A(R, 0, 690, `<div style="display:flex;justify-content:center;gap:34px;font:600 38px/1 var(--sans);color:var(--soft)"><span>A modern GPU</span><span class="mint">·</span><span>What it found</span><span class="mint">·</span><span>What's next</span></div>`, 1920, true);
+  const parts = [...sub.children];
+  return (t) => {
+    drawLogo(svg, t, 0.15);
+    svg.style.filter = `drop-shadow(0 0 ${24 * P(t, 1.6, 1)}px rgba(61,220,151,.45))`;
+    vis(ttl, P(t, S.L[0] - 0.1, 0.8), { y: 30 });
+    vis(ver, P(t, S.L[0] + 1.2, 0.6), { y: 16 });
+    const a = S.w(1, 'a modern GPU'), b = S.w(1, 'what it found'), c = S.w(1, "what's next");
+    [a, a + 0.3, b, b + 0.3, c].forEach((x, i) => vis(parts[i], P(t, x - 0.1, 0.5), { y: 14 }));
+  };
+});
+
+def('m2', [92, 200, 255], (R, S) => {
+  const [k, hh] = head(R, 'A modern GPU', 'From a 2016 laptop GPU to Ampere');
+  const card = (x, kick, kc, gpu, arch, pills, border) => A(R, x, 320, `<div class="card gcard" style="border-color:${border}"><div class="kicker ${kc}">${kick}</div><div class="big gpu">${gpu}</div><div class="arch">${arch}</div><div class="pills">${pills}</div></div>`, 780);
+  const kr = card(120, 'krabs · the last video', '', 'GTX 1070', 'Pascal · compute capability 6.1 · from 2016',
+    ['PyTorch: SKIP', 'JAX: SKIP', 'TF convolutions: no kernels'].map((x) => `<span class="pill med">${x}</span>`).join(''), 'var(--edge)');
+  const m2 = card(1020, 'M2 · this time', 'mint', 'RTX 3080', "Ampere · compute capability 8.6 · the generation of Lambda's A10 and A100",
+    ['PyTorch ✓', 'JAX ✓', 'TensorFlow ✓'].map((x) => `<span class="pill ok">${x}</span>`).join(''), 'rgba(61,220,151,.5)');
+  const arr = A(R, 922, 460, `<div class="arrow">→</div>`);
+  const host = A(R, 120, 360, `<div class="card box" style="height:300px"><div class="kicker">M2 · the host</div><div class="bt" style="margin-top:18px">CachyOS desktop</div><div class="bs">its screen runs on the same card</div><div class="mono mint" style="font-size:22px;margin-top:26px">sudo gpu-handoff.sh to-vm</div></div>`, 520);
+  const chip = A(R, 700, 445, `<div style="text-align:center"><div class="pill info" style="font-size:22px;padding:14px 20px">RTX 3080 → vfio-pci</div><div class="mono mute" style="font-size:19px;margin-top:14px">the whole card, to one VM</div></div>`, 420);
+  const a1 = A(R, 655, 462, `<div class="arrow" style="font-size:44px">→</div>`);
+  const a2 = A(R, 1125, 462, `<div class="arrow" style="font-size:44px">→</div>`);
+  const vmB = A(R, 1200, 320, `<div class="card box" style="height:180px;border-color:rgba(61,220,151,.5)"><div class="kicker mint">VM B · Ubuntu 24.04</div><div class="bt" style="margin-top:16px">Secure GPU Stack</div><div class="bs">the published release, by cloud-init</div></div>`, 600);
+  const vmA = A(R, 1200, 530, `<div class="card box" style="height:180px;border-color:rgba(255,176,32,.45)"><div class="kicker amber">VM A · Ubuntu 24.04</div><div class="bt" style="margin-top:16px">Lambda Stack</div><div class="bs">Lambda's own install script</div></div>`, 600);
+  const note = A(R, 120, 760, `<div class="mono mute" style="font-size:22px">One VM at a time gets the card, as a Lambda on-demand instance does: Lambda's docs call them GPU-backed VMs.</div>`, 1680);
+  const cut = S.L[2] - 0.2;
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    vis(kr, W(t, S.L[0] + 0.6, cut), { x: -30, y: 0 });
+    vis(arr, W(t, S.L[1], cut), { x: -20, y: 0 });
+    vis(m2, W(t, S.L[1] + 0.3, cut), { x: 30, y: 0 });
+    vis(host, P(t, S.L[2] + 0.2, 0.6), { y: 30 });
+    vis(a1, P(t, S.w(2, 'the card goes'), 0.4), { x: -16, y: 0 });
+    vis(chip, P(t, S.w(2, 'the card goes') + 0.2, 0.5), { y: 20 });
+    vis(a2, P(t, S.w(2, 'an Ubuntu VM'), 0.4), { x: -16, y: 0 });
+    vis(vmB, P(t, S.w(2, 'an Ubuntu VM') + 0.2, 0.5), { x: 24, y: 0 });
+    vis(vmA, P(t, S.w(2, 'an Ubuntu VM') + 0.5, 0.5), { x: 24, y: 0 });
+    vis(note, P(t, S.w(2, "That's also"), 0.6), { y: 16 });
+  };
+});
+
+def('install', [61, 220, 151], (R, S) => {
+  const [k, hh] = head(R, 'The published release', 'Installed the way a Lambda customer would');
+  const steps = [
+    ['Fresh Ubuntu 24.04 cloud image', 'checksums signed by Ubuntu, verified'],
+    ['Our cloud-init file', 'cloud-init/lambda-user-data.yaml'],
+    ['The published v0.1.0 release', 'SHA-256 pinned · all 49 files match the git tag'],
+    ['The install, unattended', 'driver · CUDA · Python stack · hardening'],
+    ['Reboot', 'the driver and kernel lockdown load'],
+  ];
+  const rows = steps.map(([a, b], i) => A(R, 120, 312 + i * 92, `<div class="stepr"><div class="no">${i + 1}</div><div><div class="st">${a}</div><div class="ss">${b}</div></div></div>`, 980));
+  const timer = A(R, 1220, 312, `<div class="card" style="height:260px;padding:30px 36px"><div class="kicker mint">Unattended</div><div class="big" style="font-size:150px;margin-top:22px"><span class="mn">0</span><span style="font-size:70px" class="soft"> min</span></div><div class="mute" style="font-size:21px;margin-top:10px">from first boot to rebooted and ready</div></div>`, 580);
+  const mn = timer.querySelector('.mn');
+  const badges = ['open driver 580.178.04', 'lockdown: integrity', 'no DKMS: prebuilt, signed modules'].map((x, i) => A(R, 1220, 600 + i * 62, `<div class="pill ok" style="font-size:20px;padding:11px 16px 10px">✓ ${x}</div>`));
+  const strip = A(R, 120, 790, `<div class="card" style="height:76px;padding:0 30px;display:flex;align-items:center;gap:20px;border-color:rgba(92,200,255,.45)"><span class="pill info">FIRST TEST</span><span style="font:600 25px/1.2 var(--sans)">The open-driver path every current Lambda GPU takes. krabs's Pascal GPU needs the closed driver.</span></div>`, 1680);
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    const at = [S.w(0, 'a fresh Ubuntu'), S.w(0, 'our cloud-init'), S.w(0, 'the published'), S.L[1] - 0.2, S.w(1, 'it had rebooted')];
+    rows.forEach((r, i) => vis(r, P(t, at[i] - 0.1, 0.5), { x: -24, y: 0 }));
+    vis(timer, P(t, S.L[0] + 0.4, 0.6), { x: 30, y: 0 });
+    mn.textContent = Math.round(8 * P(t, S.L[1] - 0.2, 1.6, E.inOut));
+    badges.forEach((b, i) => vis(b, P(t, S.w(1, "NVIDIA's open") + i * 0.5, 0.45, E.back), { y: 16 }));
+    vis(strip, P(t, S.L[2], 0.6), { y: 20 });
+  };
+});
+
+def('found', [255, 176, 32], (R, S) => {
+  const [k, hh] = head(R, 'What it found', 'Five problems the old laptop never could find', 'amber');
+  const F = [
+    ['77', 'Every TensorFlow convolution failed', 'two cuDNN builds of the same version, mixed in one process'],
+    ['78', 'A kernel setting undone at every reboot', "fs.suid_dumpable = 0, reset by apport, Ubuntu's crash reporter"],
+    ['79', "TensorFlow's compiler found no ptxas", "NVIDIA's assembler, on installs without a CUDA toolkit"],
+    ['80', "sgs-check's GPU test only multiplied matrices", 'so it passed the broken TensorFlow'],
+    ['81', 'A false alarm for every new Jupyter user', "the startup README IPython writes itself"],
+  ];
+  const rows = F.map(([n, a, b], i) => A(R, 120, 300 + i * 100, `<div class="frow"><div class="fn">${n}</div><div><div class="ft">${a}</div><div class="fs">${b}</div></div><div class="stamp ok" style="opacity:0">Fixed</div></div>`, 1040));
+  const stamps = rows.map((r) => r.querySelector('.stamp'));
+  const T = A(R, 1230, 300, `<div class="term" style="height:330px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>ubuntu@sgs-b: v0.1.0</span></div><div class="tb" style="font-size:19px;line-height:1.6;padding:20px 26px"><div class="m1" style="opacity:0"><span class="pr">&gt;&gt;&gt; </span>tf.linalg.matmul(a, a)</div><div class="m2 mint" style="opacity:0">    25.1 TFLOP/s on the GPU  ✓</div><div class="c1" style="opacity:0"><span class="pr">&gt;&gt;&gt; </span>tf.nn.conv2d(x, w, 1, "SAME")</div><div class="c2 red" style="opacity:0">UnknownError: cudnn status: 1008</div><div class="c3 mute" style="opacity:0">mapped: tf-cuda12/…/libcudnn.so.9</div><div class="c4 amber" style="opacity:0">mapped: /usr/lib/…/libcudnn_graph.so.9.27.0</div></div></div>`, 570);
+  const [m1, m2, c1, c2, c3, c4] = ['.m1', '.m2', '.c1', '.c2', '.c3', '.c4'].map((s) => T.querySelector(s));
+  const rel = A(R, 1230, 660, `<div class="card" style="height:150px;padding:26px 30px;border-color:rgba(61,220,151,.5)"><div class="kicker mint">Released</div><div style="font:800 46px/1 var(--sans);margin-top:18px">v0.1.1 <span class="soft" style="font:600 24px/1 var(--sans)">· verified in VM B</span></div></div>`, 570);
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    const at = [S.L[1], S.L[3], S.w(4, "TensorFlow's compiler"), S.L[4], S.w(4, 'false alarm')];
+    rows.forEach((r, i) => vis(r, P(t, at[i] - 0.1, 0.5), { x: -24, y: 0 }));
+    vis(T, P(t, S.L[1] + 0.3, 0.5), { x: 30, y: 0 });
+    c1.style.opacity = P(t, S.w(1, 'every TensorFlow') + 0.3, 0.2);
+    c2.style.opacity = P(t, S.w(1, 'failed') + 0.1, 0.2);
+    c3.style.opacity = P(t, S.w(1, 'pulled in'), 0.2);
+    c4.style.opacity = P(t, S.w(1, 'same version'), 0.2);
+    m1.style.opacity = P(t, S.L[2], 0.2);
+    m2.style.opacity = P(t, S.L[2] + 0.5, 0.2);
+    stamps.forEach((s, i) => stamp(s, P(t, S.L[5] + 0.2 + i * 0.3, 0.4), -5));
+    vis(rel, P(t, S.w(5, 'released'), 0.6), { y: 20 });
+  };
+});
+
+def('lambda', [255, 93, 93], (R, S) => {
+  const [k, hh] = head(R, 'Lambda Stack, same GPU', "Lambda's own install script, on the same card", 'red');
+  const L = [
+    ['cmd', '<span class="pr">$ </span>I_AGREE_TO_THE_CUDNN_LICENSE=1 sh install-lambda-stack.sh'],
+    ['', 'Installing Lambda Stack.'],
+    ['', 'Setting up nvidia-dkms-570-open (570.207-0lambda0.24.04.1) ...'],
+    ['', 'Building for 6.8.0-147-generic'],
+    ['red', "nvidia/nv-pci.c:240:9: error: too few arguments to function 'pci_resize_resource'"],
+    ['red', 'Error! Bad return status for module build on kernel: 6.8.0-147-generic (x86_64)'],
+    ['', 'E: Sub-process /usr/bin/dpkg returned an error code (1)'],
+    ['amber', "# again with DRIVER_SERIES=580, Lambda's 580.119.02: the same error (nv-pci.c:232)"],
+  ];
+  const T = A(R, 120, 296, `<div class="term" style="height:384px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>ubuntu@sgs-a: ~ · Lambda's script, SHA-256 1594f8d3…</span></div><div class="tb" style="font-size:21px;line-height:1.55;padding:20px 32px">${L.map(([c, x]) => `<div class="ln ${c}" style="opacity:0">${x}</div>`).join('')}</div></div>`, 1680);
+  const lns = [...T.querySelectorAll('.ln')];
+  const st = A(R, 1430, 330, `<div class="stamp no">No GPU driver</div>`);
+  const pill = A(R, 120, 708, `<div style="display:flex;align-items:center;gap:18px"><span class="pill high" style="font-size:19px">FINDING 15 · HIGH</span><span style="font:600 25px/1.2 var(--sans);color:var(--soft)">Neither driver Lambda's repository pins compiles on Ubuntu's current kernel</span></div>`, 1680);
+  const base = A(R, 120, 778, `<div class="card" style="height:82px;padding:0 30px;display:flex;align-items:center;gap:20px"><span class="kicker" style="font-size:16px">The baseline from here</span><span style="font:600 24px/1.2 var(--sans)">Ubuntu's 580.178.04 driver, the same as ours, then lambda-stack-cuda exactly as the script installs it</span></div>`, 1680);
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    vis(T, P(t, S.L[0] + 0.2, 0.5), { y: 26 });
+    const at = [S.L[0] + 0.6, S.L[0] + 1.2, S.L[0] + 1.8, S.L[0] + 2.2, S.w(1, 'It failed'), S.w(1, 'It failed') + 0.5, S.w(1, 'compiles'), S.w(1, 'so a fresh')];
+    lns.forEach((l, i) => (l.style.opacity = P(t, at[i], 0.2)));
+    stamp(st, P(t, S.w(1, 'ends up with') - 0.2, 0.45), -6);
+    vis(pill, P(t, S.L[2], 0.5), { y: 16 });
+    vis(base, P(t, S.L[3], 0.6), { y: 20 });
+  };
+});
+
+def('compare', [61, 220, 151], (R, S) => {
+  const [k, hh] = head(R, 'Head to head', 'Same GPU, same driver, same check');
+  const U = 12;
+  const bar = (y, name, sub, pass, warn, skip, big, bigc) => {
+    const el = A(R, 120, y, `<div style="display:flex;align-items:center;height:92px"><div style="width:400px"><div style="font:750 33px/1.1 var(--sans)">${name}</div><div class="mute" style="font-size:19px;margin-top:8px">${sub}</div></div><div class="bars" style="display:flex;height:42px;gap:3px;width:960px;align-items:center"><i style="height:42px;border-radius:6px 0 0 6px;background:var(--pass);width:0"></i><i style="height:42px;background:var(--warn);width:0"></i><i style="height:42px;border-radius:0 6px 6px 0;background:#3A4656;width:0"></i><span class="lbl mono" style="margin-left:20px;font-size:22px;white-space:nowrap;color:var(--soft)">${pass} PASS · ${warn} WARN</span></div><div style="margin-left:auto;text-align:right;width:220px"><div class="big ${bigc}" style="font-size:96px">${big}</div><div class="kicker" style="font-size:14px">warnings</div></div></div>`, 1680);
+    const [p, w, s] = el.querySelectorAll('.bars i');
+    return { el, p, w, s, lbl: el.querySelector('.lbl'), pass, warn, skip };
+  };
+  const b1 = bar(292, 'Lambda Stack', "its own install, Ubuntu's driver", 19, 17, 2, 17, 'amber');
+  const b2 = bar(400, 'Secure GPU Stack', 'v0.1.1', 56, 0, 0, 0, 'mint');
+  const grow = (b, t0, t) => {
+    vis(b.el, P(t, t0 - 0.3, 0.5), { y: 20 });
+    const p = P(t, t0, 1.3, E.inOut);
+    b.p.style.width = b.pass * U * p + 'px'; b.w.style.width = b.warn * U * p + 'px'; b.s.style.width = b.skip * U * p + 'px';
+    b.w.style.display = b.warn ? '' : 'none'; b.s.style.display = b.skip ? '' : 'none';
+    b.lbl.style.opacity = P(t, t0 + 1.1, 0.4);
+  };
+  const dev = A(R, 120, 530, `<div class="card" style="height:270px;padding:26px 32px"><div class="kicker">GPU device files</div><div class="crow"><span class="red" style="font-size:30px">✗</span><div>Lambda Stack: open to every account<small>0666 · the nobody account ran nvidia-smi and took 4 GB of GPU memory</small></div></div><div class="crow"><span class="mint" style="font-size:30px">✓</span><div>Secure GPU Stack: the video group only, locked<small>another account tried 1,222,020 times: 0 opens</small></div></div></div>`, 820);
+  const sp = A(R, 980, 530, `<div class="card" style="height:270px;padding:26px 32px"><div class="kicker">ResNet-50 training · images per second</div>${[['Lambda Stack', 902, 'var(--soft)', 'a'], ['Secure GPU Stack', 919, 'var(--pass)', 'b'], ['Bare metal, M2', 904, '#3A4656', 'c']].map(([n, v, c, id]) => `<div class="sp sp-${id}" style="opacity:0"><div class="sl">${n}</div><div class="sb" data-v="${v}" style="background:${c}"></div><div class="sv">${v}</div></div>`).join('')}</div>`, 820);
+  const sps = ['a', 'b', 'c'].map((id) => sp.querySelector('.sp-' + id));
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    grow(b1, S.L[1] + 0.3, t);
+    grow(b2, S.w(1, 'Secure GPU Stack'), t);
+    vis(dev, P(t, S.L[2], 0.6), { y: 30 });
+    vis(sp, P(t, S.L[3] - 0.1, 0.6), { y: 30 });
+    // Labels come with the card; each bar grows as its number is spoken.
+    const at = [S.w(3, '902'), S.w(3, '919'), S.L[4]];
+    const show = [S.L[3] + 0.2, S.L[3] + 0.35, S.L[4] - 0.2];
+    sps.forEach((r, i) => {
+      const p = P(t, at[i] - 0.1, 0.9, E.inOut);
+      r.style.opacity = P(t, show[i], 0.3);
+      const b = r.querySelector('.sb');
+      b.style.width = (+b.dataset.v / 919) * 380 * p + 'px';
+      r.querySelector('.sv').style.opacity = p;
+    });
+  };
+});
+
+def('next', [255, 176, 32], (R, S) => {
+  const [k, hh] = head(R, "What's next", 'Done on M2, and what needs a real Lambda instance');
+  const done = [
+    ['All three frameworks on a modern GPU', 'PyTorch, JAX and TensorFlow, convolutions included'],
+    ['The open-driver path', 'prebuilt, signed modules, with kernel lockdown on'],
+    ['Speed against Lambda Stack', 'same GPU and driver: within 2%'],
+    ["Lambda Stack's own install", 'fails on a current Ubuntu 24.04: finding 15'],
+  ];
+  const open = [
+    ["Lambda's own cloud image", 'its JupyterLab, default users, Secure Boot'],
+    ['Data-center GPUs', 'A100 and H100, MIG, multi-GPU NCCL'],
+    ['Existing Lambda Stack machines', 'do they lose the driver at the next kernel update?'],
+    ['A release signing key', 'downloads checked by signature, not just by hash'],
+  ];
+  const kd = A(R, 120, 300, `<div class="kicker mint">Done on M2</div>`);
+  const ko = A(R, 1000, 300, `<div class="kicker amber">Still open</div>`);
+  const row = (x, i, [a, b], d) => A(R, x, 336 + i * 108, `<div class="todo ${d ? 'done' : ''}"><div class="bx">${d ? '✓' : ''}</div><div><div class="tt">${a}</div><div class="ts">${b}</div></div></div>`, 800);
+  const dr = done.map((x, i) => row(120, i, x, true));
+  const orr = open.map((x, i) => row(1000, i, x, false));
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    vis(kd, P(t, 0.4)); dr.forEach((r, i) => vis(r, P(t, 0.6 + i * 0.3, 0.5), { x: -24, y: 0 }));
+    vis(ko, P(t, S.L[1] - 0.3));
+    orr.forEach((r, i) => vis(r, P(t, S.L[i + 1] - 0.1, 0.5), { x: 24, y: 0 }));
+  };
+});
+
+def('outro', [61, 220, 151], (R, S) => {
+  const lines = [
+    'Driver branch R580 is supported by NVIDIA until 2028-06',
+    'NVIDIA kernel module is signed (Canonical Ltd. Kernel Module Signing)',
+    'GPU device files are for the video group only, and locked (ubuntu sgs-reader)',
+    'No known vulnerabilities in 178 Python packages',
+    'All 59497 installed files match what their packages recorded',
+    'PyTorch 2.15.0+cu132: 24.4 TFLOP/s (fp32 matmul) on NVIDIA GeForce RTX 3080, convolution OK',
+    'JAX 0.12.0.1: 32.0 TFLOP/s (fp32 matmul) on gpu, convolution OK',
+    'TensorFlow 2.21.0: 16.4 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK',
+  ];
+  const T = A(R, 260, 236, `<div class="term" style="height:470px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>ubuntu@sgs-b: ~ · RTX 3080</span></div><div class="tb" style="font-size:21px;line-height:1.55;padding:24px 34px"><div><span class="pr">$ </span><span class="cmd"></span></div>${lines.map((l) => `<div class="ln" style="opacity:0"><span class="mint">  [PASS]</span> ${l}</div>`).join('')}<div class="res" style="opacity:0;margin-top:10px;font-weight:700">== Result: <span class="mint">56 PASS</span>, <span class="mint">0 WARN</span>, <span class="mute">0 SKIP</span></div></div></div>`, 1400);
+  const cmd = T.querySelector('.cmd'), lns = [...T.querySelectorAll('.ln')], res = T.querySelector('.res');
+  const L = A(R, 860, 196, `<div>${LOGO(200)}</div>`, 200, true);
+  const svg = L.querySelector('svg');
+  const ttl = A(R, 0, 440, `<div style="text-align:center;font:800 112px/1 var(--sans);letter-spacing:-.034em">Secure GPU Stack <span class="mono mint" style="font-size:44px;letter-spacing:0;vertical-align:middle">v0.1.1</span></div>`, 1920);
+  const tag = A(R, 0, 590, `<div style="text-align:center;font:600 40px/1 var(--sans);color:var(--soft)">Tested on a modern GPU. Out now.</div>`, 1920);
+  const nxt = A(R, 0, 690, `<div class="mono amber" style="text-align:center;font-size:27px">Next stop: a real Lambda instance →</div>`, 1920);
+  return (t) => {
+    const out = P(t, S.L[0] - 1.1, 0.6, E.inOut);
+    vis(T, P(t, 0.1, 0.5)); T.style.opacity *= 1 - out; T.style.transform = `scale(${1 - 0.04 * out})`;
+    const s = 'sudo sgs-check --gpu-test';
+    cmd.textContent = s.slice(0, Math.round(s.length * P(t, 0.4, 1.1, E.lin)));
+    lns.forEach((l, i) => (l.style.opacity = P(t, 1.8 + i * 0.16, 0.1)));
+    res.style.opacity = P(t, 1.8 + lines.length * 0.16 + 0.25, 0.2);
+    svg.style.opacity = out;
+    drawLogo(svg, t, S.L[0] - 0.6);
+    svg.style.filter = `drop-shadow(0 0 ${22 * P(t, S.L[0] + 1.2, 1)}px rgba(61,220,151,.45))`;
+    vis(ttl, P(t, S.L[0] + 0.2, 0.8), { y: 30 });
+    vis(tag, P(t, S.L[0] + 1.4, 0.7), { y: 20 });
+    vis(nxt, P(t, S.L[1], 0.6), { y: 16 });
+    document.getElementById('stage').style.opacity = 1 - P(t, S.dur - 1.6, 1.4, E.inOut);
+  };
+});
+
+run();
+</script>
+</body>
+</html>

@@ -3,77 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Secure GPU Stack walkthrough</title>
+<link rel="stylesheet" href="kit.css">
 <style>
-:root {
-  --bg: #080B10;
-  --ink: #EAF0F5;
-  --soft: #C3CDD8;
-  --mute: #8794A5;
-  --dim: #4A5666;
-  --edge: #223042;
-  --line: #18212D;
-  --pass: #3DDC97;
-  --warn: #FFB020;
-  --bad: #FF5D5D;
-  --info: #5CC8FF;
-  --violet: #A991FF;
-  --sans: system-ui, "SF Pro Display", "Helvetica Neue", sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --cond: "Avenir Next Condensed", "Avenir Next", system-ui, sans-serif;
-  --serif: ui-serif, "New York", Georgia, serif;
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
-#bg { position: absolute; inset: 0; background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1.2px, transparent 0); background-size: 34px 34px; }
-#vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0,0,0,.55) 100%); }
-#glow { position: absolute; width: 1600px; height: 1600px; border-radius: 50%; }
-#stage { position: absolute; inset: 0; }
-.scene { position: absolute; inset: 0; }
-.scene > * { position: absolute; }
-
-#hud { position: absolute; left: 120px; right: 120px; top: 52px; height: 30px; display: flex; justify-content: space-between; align-items: center; }
-#hud .wm { display: flex; align-items: center; gap: 14px; font: 700 17px/1 var(--sans); letter-spacing: .26em; color: var(--soft); }
-#hud .ch { font: 600 17px/1 var(--sans); letter-spacing: .2em; text-transform: uppercase; color: var(--soft); }
-#hud .ch b { font: 700 17px/1 var(--mono); color: var(--pass); letter-spacing: .06em; margin-right: 14px; }
-#cap { position: absolute; left: 0; right: 0; bottom: 58px; display: flex; justify-content: center; }
-#cap span { max-width: 1520px; text-align: center; font: 600 31px/1.36 var(--sans); color: #F4F7FA; background: rgba(6,9,13,.82); border: 1px solid #1C2633; padding: 12px 28px 14px; border-radius: 16px; }
-#prog { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: #0F151D; }
-#prog i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #2BB57B, var(--pass)); }
-#prog u { position: absolute; top: 0; bottom: 0; width: 2px; background: #2A3545; }
-
-.kicker { font: 700 19px/1 var(--sans); letter-spacing: .24em; text-transform: uppercase; color: var(--mute); }
-.h1 { font: 800 84px/1.04 var(--sans); letter-spacing: -.028em; }
-.h2 { font: 780 58px/1.08 var(--sans); letter-spacing: -.022em; }
-.lead { font: 500 30px/1.38 var(--sans); color: var(--soft); }
-.mono { font-family: var(--mono); }
-.big { font-family: var(--cond); font-weight: 800; line-height: .86; letter-spacing: -.01em; }
-.serif { font-family: var(--serif); }
-.mint { color: var(--pass); } .amber { color: var(--warn); } .red { color: var(--bad); } .blue { color: var(--info); } .mute { color: var(--mute); } .soft { color: var(--soft); }
-
-.card { background: linear-gradient(180deg, rgba(23,31,43,.94), rgba(14,20,29,.94)); border: 1px solid var(--edge); border-radius: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
-.term { background: #0B1016; border: 1px solid #253244; border-radius: 18px; box-shadow: 0 30px 90px rgba(0,0,0,.55); overflow: hidden; }
-.term .bar { height: 46px; display: flex; align-items: center; gap: 10px; padding-left: 20px; border-bottom: 1px solid #1B2430; background: #0E141C; font: 500 17px/1 var(--mono); color: var(--mute); }
-.term .bar span { margin-left: 16px; }
-.term .d { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
-.d.r { background: #FF5F57; } .d.y { background: #FEBC2E; } .d.g { background: #28C840; }
-.term .tb { padding: 30px 40px; font-family: var(--mono); color: var(--ink); white-space: pre; }
-.pr { color: var(--pass); }
-
-.pill { display: inline-flex; align-items: center; font: 700 16px/1 var(--mono); letter-spacing: .08em; padding: 8px 12px 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
-.pill.high { color: #FF8A8A; background: rgba(255,93,93,.12); border-color: rgba(255,93,93,.45); }
-.pill.med { color: #FFC660; background: rgba(255,176,32,.10); border-color: rgba(255,176,32,.42); }
-.pill.ok { color: var(--pass); background: rgba(61,220,151,.10); border-color: rgba(61,220,151,.42); }
-.pill.info { color: var(--info); background: rgba(92,200,255,.10); border-color: rgba(92,200,255,.42); }
-.stamp { position: absolute; font: 900 25px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; padding: 11px 16px 9px; border: 4px solid; border-radius: 10px; white-space: nowrap; background: rgba(8,11,16,.6); }
-.stamp.ok { color: var(--pass); border-color: var(--pass); }
-.stamp.no { color: #FF7A7A; border-color: #FF7A7A; }
-.stamp.info { color: var(--info); border-color: var(--info); }
-.stamp.warn { color: var(--warn); border-color: var(--warn); }
-.xpill { font: 600 27px/1 var(--mono); color: #FF8A8A; padding: 17px 24px; border: 1.5px solid rgba(255,93,93,.5); border-radius: 14px; background: rgba(255,93,93,.08); white-space: nowrap; }
-
-.logo * { fill: none; stroke: var(--pass); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 1; }
-.logo .lg-pin { stroke: #2E9F70; }
-
 /* scene-specific */
 .chip { display: flex; align-items: center; justify-content: center; text-align: center; height: 96px; border-radius: 16px; border: 1px solid var(--edge); background: rgba(20,28,39,.9); font: 700 27px/1.1 var(--sans); }
 .row { display: flex; align-items: center; height: 58px; border-bottom: 1px solid var(--line); font: 500 27px/1 var(--sans); }
@@ -127,62 +58,12 @@ html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; backgro
 <div id="cap"><span></span></div>
 <div id="prog"><i></i></div>
 
+
 <script src="script.js"></script>
 <script src="build/timeline.js"></script>
+<script src="kit.js"></script>
 <script>
-// ---------- toolkit: everything is a pure function of time t ----------
-const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
-const lerp = (a, b, p) => a + (b - a) * p;
-const E = {
-  lin: (p) => p,
-  out: (p) => 1 - Math.pow(1 - p, 3),
-  inOut: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
-  back: (p) => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); },
-};
-// Progress of a tween that starts at t0 and lasts d.
-const P = (t, t0, d = 0.6, e = E.out) => e(clamp((t - t0) / d));
-// Visible from a, gone by b.
-const W = (t, a, b, fi = 0.55, fo = 0.45) => Math.min(P(t, a, fi), 1 - P(t, b, fo, E.inOut));
-function vis(el, p, { x = 0, y = 26, s = 1 } = {}) {
-  el.style.opacity = p;
-  el.style.transform = p >= 1 ? '' : `translate(${(1 - p) * x}px, ${(1 - p) * y}px) scale(${s + (1 - s) * p})`;
-}
-function stamp(el, p, rot = -7) {
-  el.style.opacity = clamp(p * 3);
-  el.style.transform = `rotate(${rot}deg) scale(${p <= 0 ? 1.8 : lerp(1.8, 1, E.back(p))})`;
-}
-const fmt = (n) => Math.round(n).toLocaleString('en-US');
-function h(html) { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; }
-// Place an element absolutely in a scene, hidden until a tween shows it.
-function A(root, x, y, html, w, show = false) {
-  const e = h(html);
-  e.style.position = 'absolute';
-  e.style.left = x + 'px';
-  e.style.top = y + 'px';
-  if (w) e.style.width = w + 'px';
-  e.style.opacity = show ? 1 : 0;
-  root.appendChild(e);
-  return e;
-}
-const LOGO = (size) => `<svg viewBox="0 0 200 200" width="${size}" height="${size}" class="logo">
-  <rect class="lg-body" x="50" y="50" width="100" height="100" rx="16" pathLength="1"/>
-  <path class="lg-pin" pathLength="1" d="M66 50V28M83 50V28M100 50V28M117 50V28M134 50V28M66 150V172M83 150V172M100 150V172M117 150V172M134 150V172M50 66H28M50 83H28M50 100H28M50 117H28M50 134H28M150 66H172M150 83H172M150 100H172M150 117H172M150 134H172"/>
-  <path class="lg-shield" pathLength="1" d="M100 70L125 80V100C125 116 114 126 100 131C86 126 75 116 75 100V80Z"/>
-  <path class="lg-check" pathLength="1" d="M88 101L97 110L113 92"/>
-</svg>`;
-function drawLogo(svg, t, t0) {
-  const parts = [['.lg-body', 0, 1.0], ['.lg-pin', 0.4, 1.0], ['.lg-shield', 0.8, 0.9], ['.lg-check', 1.4, 0.5]];
-  for (const [sel, d0, d] of parts) svg.querySelector(sel).style.strokeDashoffset = 1 - P(t, t0 + d0, d, E.inOut);
-}
-const head = (R, kicker, title, kc = '') => [
-  A(R, 120, 168, `<div class="kicker ${kc}">${kicker}</div>`),
-  A(R, 120, 204, `<div class="h2">${title}</div>`, 1680),
-];
-
 // ---------- scenes ----------
-const SCN = {};
-const def = (id, glow, build) => (SCN[id] = { glow, build });
-
 def('cold', [255, 93, 93], (R, S) => {
   const T = A(R, 210, 330, `<div class="term" style="height:250px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>ubuntu@gpu-node: ~</span></div><div class="tb" style="font-size:30px"><span class="pr">$ </span><span class="c1"></span><span class="c2" style="border-radius:6px"></span><span class="cur" style="background:var(--ink)"> </span></div></div>`, 1500);
   const c1 = T.querySelector('.c1'), c2 = T.querySelector('.c2'), cur = T.querySelector('.cur');
@@ -684,67 +565,7 @@ def('outro', [61, 220, 151], (R, S) => {
   };
 });
 
-// ---------- engine ----------
-const TL = globalThis.TIMELINE;
-window.DURATION = TL.duration;
-window.FPS = TL.fps;
-const stageEl = document.getElementById('stage');
-const glow = document.getElementById('glow');
-const capEl = document.querySelector('#cap span');
-const hudEl = document.getElementById('hud');
-const chB = document.querySelector('#hud .ch b'), chS = document.querySelector('#hud .ch span');
-const progI = document.querySelector('#prog i');
-let chapterNo = 0;
-const live = TL.scenes.map((sc) => {
-  const root = document.createElement('div');
-  root.className = 'scene';
-  root.style.display = 'none';
-  stageEl.appendChild(root);
-  const S = { dur: sc.dur, L: sc.lines.map((l) => l.start), E: sc.lines.map((l) => l.start + l.dur), T: sc.lines.map((l) => l.text) };
-  // Roughly when a phrase is spoken inside line i, by its position in the text.
-  S.w = (i, phrase) => {
-    const k = S.T[i].indexOf(phrase);
-    if (k < 0) throw new Error(`${sc.id}: "${phrase}" not in line ${i}`);
-    return S.L[i] + ((S.E[i] - S.L[i]) * k) / S.T[i].length;
-  };
-  const def = SCN[sc.id];
-  const update = def.build(root, S);
-  const no = sc.chapter ? ++chapterNo : 0;
-  return { sc, root, S, update, glow: def.glow, no };
-});
-for (const x of live) if (x.no) { const u = document.createElement('u'); u.style.left = (100 * x.sc.start / TL.duration) + '%'; document.getElementById('prog').appendChild(u); }
-
-let shown = -1;
-window.seek = function (t) {
-  let i = live.findIndex((x) => t >= x.sc.start && t < x.sc.start + x.sc.dur);
-  if (i < 0) i = t < 0 ? 0 : live.length - 1;
-  const x = live[i];
-  if (i !== shown) { live.forEach((y, j) => (y.root.style.display = j === i ? 'block' : 'none')); shown = i; }
-  const lt = t - x.sc.start;
-  const f = clamp(Math.min(lt / 0.45, (x.sc.dur - lt) / 0.45));
-  x.root.style.opacity = f;
-  if (x.sc.id !== 'outro') stageEl.style.opacity = 1;
-  x.update(lt);
-
-  const [r, g, b] = x.glow;
-  const gx = 960 + 380 * Math.sin(t * 0.11 + i), gy = 520 + 180 * Math.cos(t * 0.09 + i * 1.7);
-  glow.style.left = gx - 800 + 'px'; glow.style.top = gy - 800 + 'px';
-  glow.style.background = `radial-gradient(closest-side, rgba(${r},${g},${b},${0.13 * f}), rgba(${r},${g},${b},0))`;
-
-  hudEl.style.opacity = x.no ? f : 0;
-  if (x.no) { chB.textContent = String(x.no).padStart(2, '0'); chS.textContent = x.sc.chapter; }
-  progI.style.width = (100 * t / TL.duration) + '%';
-
-  let cap = '';
-  let cp = 0;
-  for (const l of x.sc.lines) {
-    if (lt >= l.start - 0.05 && lt < l.start + l.dur + 0.3) { cap = l.text; cp = Math.min(P(lt, l.start - 0.05, 0.15), 1 - P(lt, l.start + l.dur + 0.15, 0.15)); }
-  }
-  capEl.textContent = cap;
-  capEl.parentElement.style.opacity = cap ? cp : 0;
-};
-const q = new URLSearchParams(location.search);
-window.seek(q.has('t') ? +q.get('t') : 0);
+run();
 </script>
 </body>
 </html>

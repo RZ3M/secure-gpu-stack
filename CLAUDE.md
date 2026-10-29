@@ -132,7 +132,8 @@ TensorFlow and JAX in the system Python. Options:
   the walkthrough videos and the first install tarball. v0.1.1 (2026-10-29,
   with the M2 fixes) is the current tarball; its SHA-256 is in the annotated
   `v0.1.1` tag.
-- **Walkthrough video:** `video/` (see `video/README.md`).
+- **Walkthrough videos:** `video/` (8:50) and `video/m2/` (the M2 update,
+  3:38); see `video/README.md`.
 - **Goal and success criteria:** `README.md`.
 - **Findings about Lambda Stack, with evidence:** `docs/lambda-stack-findings.md`.
 - **Design decisions and trade-offs:** `docs/design.md`.
@@ -327,12 +328,19 @@ TensorFlow and JAX in the system Python. Options:
   `RZ3M/secure-gpu-stack`, both branches, default branch `stack/v0.1`.
 - [x] M2 test bench (2026-10-29): the Lambda test plan on an RTX 3080 in
   Ubuntu 24.04 VMs. Published v0.1.0 via cloud-init: open driver, lockdown,
-  all three frameworks on the GPU. Findings 77–81, all fixed, not committed:
+  all three frameworks on the GPU. Findings 77–81, all fixed, released as v0.1.1:
   TensorFlow convolutions broken by mixed cuDNN builds, apport undoing
   `suid_dumpable=0` at boot, XLA without ptxas, GPU test matmul-only, IPython
   README false positive. B 56 PASS / 0 WARN; Lambda Stack 19 PASS / 17 WARN
   on the same GPU and driver, within 2% on speed. Lambda's own install fails
   on a fresh 24.04 (Lambda Stack finding 15).
+- [x] M2 update video and summary page (2026-10-29): `video/m2/`, 3:38, same
+  voice. The two videos now share `video/kit.css` and `video/kit.js`; both
+  build scripts take the video's folder (`node video/render.mjs video/m2`).
+  The MP4 stays on the user's Mac (`video/m2/out/`): the user shares it, so
+  don't upload it. The summary page
+  (https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM) is at version 2, with
+  a "What's new in v0.1.1" section; it says the video is shared separately.
 - [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: Lambda's cloud
   image, data-center GPUs, multi-GPU NCCL. This is waiting for the user to
   provide a Lambda environment.

@@ -11,6 +11,9 @@ and a check command proves it.
   Download it from the
   [v0.1.0 release](https://github.com/RZ3M/secure-gpu-stack/releases/tag/v0.1.0).
   Its source is in [video/](video/).
+- **The M2 update** (3:38): what testing on an RTX 3080 showed, what it
+  found, and what's next. Shared separately; its source is in
+  [video/m2/](video/m2/).
 - **Summary page:** [Secure GPU Stack](https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM).
 
 ## Goal

@@ -1,0 +1,72 @@
+/* Shared by every video in this folder: the frame (background, glow, HUD,
+   captions, progress bar) and the visual vocabulary scenes build with. Each
+   stage.html adds its own scene-specific styles after this. */
+:root {
+  --bg: #080B10;
+  --ink: #EAF0F5;
+  --soft: #C3CDD8;
+  --mute: #8794A5;
+  --dim: #4A5666;
+  --edge: #223042;
+  --line: #18212D;
+  --pass: #3DDC97;
+  --warn: #FFB020;
+  --bad: #FF5D5D;
+  --info: #5CC8FF;
+  --violet: #A991FF;
+  --sans: system-ui, "SF Pro Display", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --cond: "Avenir Next Condensed", "Avenir Next", system-ui, sans-serif;
+  --serif: ui-serif, "New York", Georgia, serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+#bg { position: absolute; inset: 0; background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1.2px, transparent 0); background-size: 34px 34px; }
+#vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0,0,0,.55) 100%); }
+#glow { position: absolute; width: 1600px; height: 1600px; border-radius: 50%; }
+#stage { position: absolute; inset: 0; }
+.scene { position: absolute; inset: 0; }
+.scene > * { position: absolute; }
+
+#hud { position: absolute; left: 120px; right: 120px; top: 52px; height: 30px; display: flex; justify-content: space-between; align-items: center; }
+#hud .wm { display: flex; align-items: center; gap: 14px; font: 700 17px/1 var(--sans); letter-spacing: .26em; color: var(--soft); }
+#hud .ch { font: 600 17px/1 var(--sans); letter-spacing: .2em; text-transform: uppercase; color: var(--soft); }
+#hud .ch b { font: 700 17px/1 var(--mono); color: var(--pass); letter-spacing: .06em; margin-right: 14px; }
+#cap { position: absolute; left: 0; right: 0; bottom: 58px; display: flex; justify-content: center; }
+#cap span { max-width: 1520px; text-align: center; font: 600 31px/1.36 var(--sans); color: #F4F7FA; background: rgba(6,9,13,.82); border: 1px solid #1C2633; padding: 12px 28px 14px; border-radius: 16px; }
+#prog { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: #0F151D; }
+#prog i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #2BB57B, var(--pass)); }
+#prog u { position: absolute; top: 0; bottom: 0; width: 2px; background: #2A3545; }
+
+.kicker { font: 700 19px/1 var(--sans); letter-spacing: .24em; text-transform: uppercase; color: var(--mute); }
+.h1 { font: 800 84px/1.04 var(--sans); letter-spacing: -.028em; }
+.h2 { font: 780 58px/1.08 var(--sans); letter-spacing: -.022em; }
+.lead { font: 500 30px/1.38 var(--sans); color: var(--soft); }
+.mono { font-family: var(--mono); }
+.big { font-family: var(--cond); font-weight: 800; line-height: .86; letter-spacing: -.01em; }
+.serif { font-family: var(--serif); }
+.mint { color: var(--pass); } .amber { color: var(--warn); } .red { color: var(--bad); } .blue { color: var(--info); } .mute { color: var(--mute); } .soft { color: var(--soft); }
+
+.card { background: linear-gradient(180deg, rgba(23,31,43,.94), rgba(14,20,29,.94)); border: 1px solid var(--edge); border-radius: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+.term { background: #0B1016; border: 1px solid #253244; border-radius: 18px; box-shadow: 0 30px 90px rgba(0,0,0,.55); overflow: hidden; }
+.term .bar { height: 46px; display: flex; align-items: center; gap: 10px; padding-left: 20px; border-bottom: 1px solid #1B2430; background: #0E141C; font: 500 17px/1 var(--mono); color: var(--mute); }
+.term .bar span { margin-left: 16px; }
+.term .d { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.d.r { background: #FF5F57; } .d.y { background: #FEBC2E; } .d.g { background: #28C840; }
+.term .tb { padding: 30px 40px; font-family: var(--mono); color: var(--ink); white-space: pre; }
+.pr { color: var(--pass); }
+
+.pill { display: inline-flex; align-items: center; font: 700 16px/1 var(--mono); letter-spacing: .08em; padding: 8px 12px 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.pill.high { color: #FF8A8A; background: rgba(255,93,93,.12); border-color: rgba(255,93,93,.45); }
+.pill.med { color: #FFC660; background: rgba(255,176,32,.10); border-color: rgba(255,176,32,.42); }
+.pill.ok { color: var(--pass); background: rgba(61,220,151,.10); border-color: rgba(61,220,151,.42); }
+.pill.info { color: var(--info); background: rgba(92,200,255,.10); border-color: rgba(92,200,255,.42); }
+.stamp { position: absolute; font: 900 25px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; padding: 11px 16px 9px; border: 4px solid; border-radius: 10px; white-space: nowrap; background: rgba(8,11,16,.6); }
+.stamp.ok { color: var(--pass); border-color: var(--pass); }
+.stamp.no { color: #FF7A7A; border-color: #FF7A7A; }
+.stamp.info { color: var(--info); border-color: var(--info); }
+.stamp.warn { color: var(--warn); border-color: var(--warn); }
+.xpill { font: 600 27px/1 var(--mono); color: #FF8A8A; padding: 17px 24px; border: 1.5px solid rgba(255,93,93,.5); border-radius: 14px; background: rgba(255,93,93,.08); white-space: nowrap; }
+
+.logo * { fill: none; stroke: var(--pass); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 1; }
+.logo .lg-pin { stroke: #2E9F70; }

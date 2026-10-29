@@ -6,8 +6,10 @@
 //   build/music.wav       the music bed alone (for a version without the voice)
 //   out/captions.srt, out/narration-script.md
 //
-// Usage: node video/build-audio.mjs
-// The OpenRouter key comes from OPENROUTER_API_KEY or the project's .env.
+// Usage: node video/build-audio.mjs [FOLDER]
+// FOLDER holds script.js, and gets build/ and out/ (default: video/ itself,
+// the walkthrough; video/m2 is the M2 update). The OpenRouter key comes from
+// OPENROUTER_API_KEY or the project's .env.
 // Clips are cached: only lines whose text, model or voice changed are
 // requested again.
 
@@ -16,14 +18,16 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BUILD = path.join(HERE, 'build');
+const DIR = process.argv[2] ? path.resolve(process.argv[2]) : HERE;
+const BUILD = path.join(DIR, 'build');
 const AUD = path.join(BUILD, 'audio');
-const OUT = path.join(HERE, 'out');
+const OUT = path.join(DIR, 'out');
 fs.mkdirSync(AUD, { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
 
-await import(pathToFileURL(path.join(HERE, 'script.js')).href);
-const { model, voice, fps, scenes } = globalThis.SCRIPT;
+await import(pathToFileURL(path.join(DIR, 'script.js')).href);
+// name: the output files' base name; title: the narration script's heading.
+const { model, voice, fps, scenes, name = 'secure-gpu-stack', title = 'Secure GPU Stack walkthrough' } = globalThis.SCRIPT;
 const SR = 44100;
 
 // How the voice should say words it would otherwise spell out or misread.
@@ -175,7 +179,7 @@ for (const l of clips) {
 
 // 2. Timeline: scenes play back to back; lines inside a scene follow each other.
 let t = 0;
-const timeline = { fps, scenes: [] };
+const timeline = { fps, name, scenes: [] };
 for (const sc of scenes) {
   let c = sc.lead ?? 0.6;
   const lines = sc.lines.map((l, i) => {
@@ -301,10 +305,11 @@ fs.writeFileSync(path.join(OUT, 'captions.srt'), srt);
 // 6. The narration as a script with timestamps, for recording a voice-over
 //    on top of the version without the voice.
 const mmss = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`;
-let md = '# Secure GPU Stack walkthrough: narration script\n\n';
+const folder = DIR === HERE ? '' : ` ${path.relative(path.join(HERE, '..'), DIR)}`;
+let md = `# ${title}: narration script\n\n`;
 md += 'Each line starts at the time shown. To record your own voice, play\n';
-md += '`secure-gpu-stack-no-voice.mp4` and read along; the captions show each\n';
-md += 'line as it comes up. Regenerate with `node video/build-audio.mjs`.\n';
+md += `\`${name}-no-voice.mp4\` and read along; the captions show each\n`;
+md += `line as it comes up. Regenerate with \`node video/build-audio.mjs${folder}\`.\n`;
 timeline.scenes.forEach((sc, i) => {
   md += `\n## ${mmss(sc.start)} ${sc.chapter ?? (i === 0 ? 'Opening' : i === 1 ? 'Title' : 'Closing')}\n\n`;
   for (const l of sc.lines) md += `- **${mmss(sc.start + l.start)}** ${l.text}\n`;
