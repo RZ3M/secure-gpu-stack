@@ -128,7 +128,7 @@ TensorFlow and JAX in the system Python. Options:
 
 ## Where things are (v0.1, branch `stack/v0.1`)
 
-- **On GitHub:** `RZ3M/secure-gpu-stack` (private). The v0.1.0 release holds
+- **On GitHub:** `RZ3M/secure-gpu-stack` (public since 2026-10-29). The v0.1.0 release holds
   the walkthrough videos and the install tarball.
 - **Walkthrough video:** `video/` (see `video/README.md`).
 - **Goal and success criteria:** `README.md`.
@@ -300,7 +300,7 @@ TensorFlow and JAX in the system Python. Options:
 - [x] Walkthrough video (2026-10-29): `video/`, 8:50, narrated with
   OpenRouter's HeyGen voice "noelle" (never macOS `say`). The MP4s are
   assets of the v0.1.0 GitHub release, not tracked in git.
-- [x] Pushed to GitHub (2026-10-29): private repository
+- [x] Pushed to GitHub (2026-10-29): public repository
   `RZ3M/secure-gpu-stack`, both branches, default branch `stack/v0.1`.
 - [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: the driver path
   on Turing or newer, PyTorch convolutions and NCCL with the separated CUDA 12
