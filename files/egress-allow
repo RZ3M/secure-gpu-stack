@@ -1,0 +1,26 @@
+# Secure GPU Stack: the domains ordinary users can reach in strict mode
+# (sudo sgs-egress strict). One per line; each covers its subdomains too.
+# After editing, run sudo sgs-egress strict again.
+
+# Python packages: PyPI and PyTorch's index
+pypi.org
+pythonhosted.org
+pytorch.org
+# Models and datasets
+huggingface.co
+hf.co
+# Code
+github.com
+githubusercontent.com
+# Ubuntu, NVIDIA and Docker packages, for apt and Docker image pulls
+ubuntu.com
+nvidia.com
+docker.com
+docker.io
+# System services. Root's traffic isn't filtered, but every lookup, root's
+# included, goes through the strict resolver, so these must be listed:
+# Ubuntu's Livepatch and snaps, and Tailscale if you use it.
+canonical.com
+snapcraft.io
+tailscale.com
+tailscale.io

@@ -1,0 +1,94 @@
+#!/bin/sh
+# Secure GPU Stack: GPU device files for the video group only, and locked.
+#
+# Ubuntu creates /dev/nvidia* readable and writable by every local user
+# (0666), so every service account and every local user can reach the NVIDIA
+# kernel driver, which NVIDIA's security bulletins regularly patch. Four things
+# create or reset them (all seen on krabs): Ubuntu's ub-device-create (from
+# udev), nvidia-cdi-refresh, and NVIDIA's library whenever root uses the GPU,
+# which follows the module options in /etc/modprobe.d/sgs-nvidia.conf for most
+# files but always makes the UVM ones 0666 (nvidia-modprobe-utils.c reads no
+# options for them). Setting the mode afterwards loses that race: a process
+# retrying open() won it 20 times out of 20, and 10 out of 10 when the files
+# were first created. So:
+#
+# - Missing files are created here, 0660 from the start, never open to others.
+#   install.sh diverts ub-device-create to `sgs-gpu-devices --no-lock`.
+# - Each file is set to root:video 0660, then locked with a read-only bind
+#   mount onto itself: chmod and chown on it fail, opening the device works.
+#   The lock stops NVIDIA's library, not a determined root.
+#
+# Locking needs the host's mount namespace (udevd's mounts are private), so
+# sgs-gpu-devices.service does it when the driver loads, before
+# nvidia-cdi-refresh and nvidia-persistenced; so does every nvidia-cdi-refresh
+# run, and install.sh. Only the files CUDA uses are touched; others (NVSwitch,
+# NVLink) are left for sgs-check to report. Exits 1 if any file isn't right.
+lock=1
+[ "${1:-}" = --no-lock ] && lock=0
+gid=$(getent group video | cut -d: -f3)
+if [ -z "$gid" ]; then
+  logger -s -t sgs-gpu-devices "there's no video group: GPU device files left as they are"
+  exit 1
+fi
+mounted() { awk -v p="$1" '$5 == p { m = 1 } END { exit !m }' /proc/self/mountinfo; }
+# Tested, not read from mountinfo: /dev's shared propagation can stack copies
+# of a mount, and the last line listed isn't always the one a path reaches.
+# On a file that's already 0660, chmod 0660 changes nothing, and fails exactly
+# when the lock holds.
+locked() { chmod 0660 "$1" 2>&1 | grep -q 'Read-only file system'; }
+# Lazily, since a process holding the file open makes a plain umount fail.
+unlock() {
+  n=0
+  while mounted "$1" && [ "$n" -lt 8 ]; do umount -l "$1"; n=$((n + 1)); done
+}
+loaded() { grep -q "^$1 " /proc/modules; }
+uvm_major=$(awk '$2 == "nvidia-uvm" { print $1 }' /proc/devices)
+
+# The files the loaded modules need, as "path major minor".
+want() {
+  loaded nvidia || return 0
+  echo /dev/nvidiactl 195 255
+  for info in /proc/driver/nvidia/gpus/*/information; do
+    [ -r "$info" ] || continue
+    awk '$1 == "Device" && $2 == "Minor:" { print "/dev/nvidia" $3, 195, $3 }' "$info"
+  done
+  loaded nvidia_modeset && echo /dev/nvidia-modeset 195 254
+  if loaded nvidia_uvm && [ -n "$uvm_major" ]; then
+    echo /dev/nvidia-uvm "$uvm_major" 0
+    echo /dev/nvidia-uvm-tools "$uvm_major" 1
+  fi
+}
+devices=$(want)
+
+while read -r dev major minor; do
+  [ -n "$dev" ] || continue
+  # Stale device numbers (nvidia_uvm reloaded with a new major): the lock
+  # stops anything else from replacing the file.
+  if [ -e "$dev" ] && [ "$(stat -c %t:%T "$dev")" != "$(printf %x:%x "$major" "$minor")" ]; then
+    unlock "$dev"
+    rm -f "$dev"
+  fi
+  [ -e "$dev" ] || mknod -m 0660 "$dev" c "$major" "$minor"
+  if [ "$(stat -c %u:%g:%a "$dev")" != "0:$gid:660" ]; then
+    [ "$lock" = 0 ] || unlock "$dev"
+    chown "0:$gid" "$dev" && chmod 0660 "$dev"
+  fi
+  if [ "$lock" = 1 ] && ! locked "$dev"; then
+    unlock "$dev"
+    mount --bind "$dev" "$dev" && mount -o remount,bind,ro "$dev"
+  fi
+done <<EOF
+$devices
+EOF
+
+fail=0
+while read -r dev major minor; do
+  [ -n "$dev" ] || continue
+  if [ "$(stat -c %u:%g:%a "$dev" 2>/dev/null)" != "0:$gid:660" ] || { [ "$lock" = 1 ] && ! locked "$dev"; }; then
+    logger -s -t sgs-gpu-devices "$dev isn't root:video 0660 and locked"
+    fail=1
+  fi
+done <<EOF
+$devices
+EOF
+exit "$fail"

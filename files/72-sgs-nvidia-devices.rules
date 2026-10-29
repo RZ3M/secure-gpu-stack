@@ -1,0 +1,6 @@
+# Secure GPU Stack: after Ubuntu's 71-nvidia.rules creates the GPU device files
+# (0666, every local user), limit them to the video group and lock them. Same
+# events as ub-device-create. A service, not RUN+=: the lock is a bind mount,
+# and mounts made inside systemd-udevd (PrivateMounts=yes) stay there.
+ACTION=="add", DEVPATH=="/bus/pci/drivers/nvidia", TAG+="systemd", ENV{SYSTEMD_WANTS}+="sgs-gpu-devices.service"
+ACTION=="add", DEVPATH=="/module/nvidia_uvm", SUBSYSTEM=="module", TAG+="systemd", ENV{SYSTEMD_WANTS}+="sgs-gpu-devices.service"

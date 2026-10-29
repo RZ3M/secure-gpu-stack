@@ -1,0 +1,25 @@
+# The ML stack, matching what Lambda Stack ships, at current upstream versions.
+# Lockfiles (with SHA-256 hashes for every file) are generated from this with
+# python/lock.sh. Edit this file, re-lock, then re-run sgs-check's audit.
+#
+# Everything comes from PyPI only. A single index means no dependency-confusion
+# games between indexes.
+
+# Upgrade pip inside the environment too: Ubuntu's venv ships pip 24.0, which
+# has known CVEs.
+pip==26.2.2
+
+torch==2.15.0
+torchvision==0.29.2
+# TensorFlow's CUDA 12 libraries are locked separately (tf-cuda12.in) and
+# installed outside this environment: their files collide with the CUDA 13
+# wheels PyTorch and JAX use.
+tensorflow==2.21.0
+keras==3.15.1
+jax[cuda13]==0.12.0.1
+jupyterlab==4.6.4
+
+# Not shipped, on purpose:
+# - flash-attn: Lambda ships 2.7.4.post1. CVE-2026-31253 (insecure checkpoint
+#   deserialization) has no fixed release yet. Users who need it can install it
+#   into their own environment.

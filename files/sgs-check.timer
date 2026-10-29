@@ -1,0 +1,12 @@
+# Secure GPU Stack: run sgs-check once a day (and at the next boot if a day
+# was missed).
+[Unit]
+Description=Daily Secure GPU Stack posture check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

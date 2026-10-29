@@ -1,0 +1,7 @@
+# Secure GPU Stack: NVIDIA publishes NCCL once per CUDA release
+# (e.g. 2.32.3-1+cuda13.4). Prefer the builds for CUDA 13.0, the toolkit this
+# stack installs. Newer 13.0 builds still upgrade normally. The priority is
+# below 1000, so this can never force a downgrade.
+Package: libnccl2 libnccl-dev
+Pin: version *+cuda13.0
+Pin-Priority: 600

@@ -1,0 +1,19 @@
+== Reaching the machine
+Warning: Permanently added '10.0.0.237' (ED25519) to the list of known hosts.
+  [PASS] SSH with the key works, so the machine is reachable from here
+== Jupyter
+  [PASS] JupyterLab is not reachable directly on 10.0.0.237:8888
+  [PASS] JupyterLab works through an SSH tunnel
+  [PASS] another account on the machine (nobody) can't reach JupyterLab at all
+== SSH
+  [PASS] the server only offers key logins (publickey)
+  [PASS] root can't log in over SSH (PermitRootLogin no)
+== Docker-published ports
+  [NOTE] 'docker run -p 0.0.0.0:8081:8080' IS reachable, even with the firewall on:
+         Docker writes its own firewall rules. That's why the default matters.
+  [PASS] 'docker run -p 8080:8080' stays on localhost by default
+  [PASS] a port published on its own Docker network (as docker compose does) stays on localhost
+== A compromised service account on the machine
+  [PASS] a service account (nobody) couldn't open any GPU device file while root used the GPU (5 files, 1496895 tries)
+
+== Nothing reachable that shouldn't be

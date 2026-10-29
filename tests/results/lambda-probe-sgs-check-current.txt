@@ -1,0 +1,73 @@
+  [WARN] NVIDIA Container Toolkit 1.18.1 is older than 1.19.1 (CVE-2026-24260)
+  [PASS] Home folders are closed to other users
+  [WARN] The record of startup files is from an older sgs-check (check them, then: sudo sgs-check --accept-changes)
+== Result: 15 PASS, 15 WARN, 4 SKIP
+Recorded 234 startup files (/var/lib/sgs/startup-files).
+
+== Machine
+  Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic, arm64
+  NVIDIA GPUs: 0
+  Stack: Lambda Stack
+
+== Package sources
+  [WARN] archive.lambdalabs.com: plain HTTP, key not limited to this source
+  [WARN] lambda-keyring.gpg is trusted for every repository, not just its own
+  [WARN] Pin at 1001 overrides other sources and allows downgrades: /etc/apt/preferences.d/lambda-repository
+         
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [SKIP] No NVIDIA driver or GPU on this machine
+
+== Containers
+  [WARN] NVIDIA Container Toolkit 1.18.1 is older than 1.19.1 (CVE-2026-24260)
+  [SKIP] Docker not installed
+
+== Python ML stack
+         Stack is mixed into the OS's own Python (/usr/lib/python3/dist-packages)
+         torch 2.7.0   keras 3.10.0   jax 0.6.0
+  [PASS] Stack packages are read-only for users
+  [PASS] Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root
+  [PASS] No system CUDA libraries override the stack's
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [WARN] 44 vulnerability advisories in 3 of 166 Python packages
+           keras 3.10.0: 28  (lambda package)
+           torch 2.7.0: 15  (lambda package)
+           fsspec 2024.3.1: 1  (lambda package)
+         Not counted: 258 matches in 31 packages Ubuntu maintains (Ubuntu often fixes these without changing the version)
+  [PASS] The driver, CUDA, cuDNN, NCCL and container files match their packages (4 packages)
+
+== Network exposure
+  [PASS] Only SSH listens on the network
+         UDP listeners (blocked by the firewall's default deny): 192.168.252.5%enp0s1:68 [fe80::5054:ff:fe6e:fe46]%enp0s1:546 
+         JupyterLab isn't running
+  [WARN] Nothing stops ordinary users or containers from reaching the cloud metadata address (169.254.169.254)
+  [WARN] Firewall is off: every listening program is reachable
+
+== Kernel and audit
+  [WARN] Kernel hardening settings loosened: kernel.io_uring_disabled=0 dev.tty.ldisc_autoload=1 net.ipv4.conf.all.accept_redirects=1 net.ipv4.conf.default.accept_redirects=1 net.ipv4.conf.enp0s1.accept_redirects=1 net.ipv4.conf.all.send_redirects=1 net.ipv4.conf.default.send_redirects=1 (and more)
+  [WARN] Kernel lockdown is off: root can load unsigned kernel modules and write kernel memory, a rootkit's way in
+  [WARN] Ordinary users can create user namespaces: through aa-exec -p 1password (kernel.apparmor_restrict_unprivileged_*)
+  [WARN] auditd isn't installed: changes leave no audit trail
+
+== Secrets
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+  [PASS] No cron job, service, startup file, login hook or SSH key changed since it was last accepted
+
+== SSH
+  [PASS] Password login is off
+  [WARN] Root login allowed (without-password)
+  [WARN] X11 forwarding is on: whoever takes over this machine can reach the screen and keystrokes of users connected with ssh -X
+
+== Updates
+  [PASS] No pending security updates
+         8 other (non-security) updates available
+  [PASS] Automatic security updates are on
+  [WARN] Automatic updates skip these packages: nvidia-container-toolkit (lambdalabs.com / Lambda Labs Ubuntu repository (Noble)), libnvidia-container1 (lambdalabs.com / Lambda Labs Ubuntu repository (Noble))
+  [PASS] Automatic updates completed a run in the last 3 days
+  [WARN] apt's daily jobs have no time limit: apt-daily apt-daily-upgrade (one hung run can block every update)
+  [PASS] No reboot needed
+
+== Result: 16 PASS, 15 WARN, 2 SKIP

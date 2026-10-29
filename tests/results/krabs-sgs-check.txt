@@ -1,0 +1,96 @@
+Waiting for another sgs-check run to finish...
+
+== Machine
+  Ubuntu 24.04.5 LTS, kernel 7.0.0-42-generic, amd64
+  NVIDIA GPUs: 1
+  Stack: Secure GPU Stack 0.1.0
+
+== Package sources
+  [PASS] pkgs.tailscale.com: HTTPS, key limited to this source
+  [PASS] download.docker.com: HTTPS, key limited to this source
+  [PASS] deb.nodesource.com: HTTPS, key limited to this source
+  [PASS] developer.download.nvidia.com: HTTPS, key limited to this source
+  [PASS] sgs-nvidia-cuda.gpg is still the key pinned at install (EB693B3035CD5710E231E123A4B469963BF863CC)
+  [PASS] sgs-docker.gpg is still the key pinned at install (9DC858229FC7DD38854AE2D88D81803C0EBFCD88)
+  [PASS] No third-party key is trusted for every repository
+  [PASS] No apt pin can override Ubuntu's updates or force downgrades
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [PASS] Driver branch R580 is supported by NVIDIA until 2028-06
+  [PASS] Driver is the newest build Ubuntu offers
+  [PASS] GPU performance counters are admin-only
+  [PASS] NVIDIA kernel module is signed (Canonical Ltd. Kernel Module Signing)
+         SecureBoot enabled
+  [PASS] GPU device files are for the video group only, and locked (jm)
+
+== Containers
+  [PASS] NVIDIA Container Toolkit 1.20.1
+  [WARN] In the docker group (equivalent to root): jm
+  [PASS] Published container ports stay on localhost unless asked otherwise, on every Docker network
+  [WARN] Docker networks that publish ports on every interface (recreate them): firecrawl_backend
+  [PASS] Containers can't gain privileges through setuid programs
+  [PASS] Containers get the GPU only when asked (--gpus or --device)
+  [PASS] GPU device spec matches the installed driver (/var/run/cdi/nvidia.yaml)
+
+== Python ML stack
+  [PASS] Stack lives in its own environment, separate from the OS's Python
+         torch 2.15.0   tensorflow 2.21.0   keras 3.15.1   jax 0.12.0.1   jupyterlab 4.6.4
+  [PASS] The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)
+  [PASS] Stack packages are read-only for users
+  [PASS] Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root
+  [PASS] No system CUDA libraries override the stack's
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [PASS] No known vulnerabilities in 178 Python packages
+  [PASS] All 59497 installed files match what their packages recorded
+  [PASS] The stack's own files (startup hook, commands, Jupyter unit) are as installed
+  [PASS] The driver, CUDA, cuDNN, NCCL and container files match their packages (90 packages)
+
+== Network exposure
+  [WARN] Listening to the network besides SSH: *:9377 0.0.0.0:8765
+         The firewall blocks all of these from the network
+         Reachable only over Tailscale: 100.84.48.34%tailscale0:43113 100.84.48.34%tailscale0:443 [fd7a:115c:a1e0::a401:30b5]%tailscale0:443 [fd7a:115c:a1e0::a401:30b5]%tailscale0:49877
+         UDP listeners (blocked by the firewall's default deny): 0.0.0.0:38669 0.0.0.0:41641 0.0.0.0:5353 [::]:41641 [::]:46594 [::]:5353 [fe80::ff06:ea26:4b93:23f4]%wlp3s0:546 
+  [PASS] JupyterLab listens only on a socket its user alone can open (reach it with an SSH tunnel: sgs-jupyter)
+  [PASS] JupyterLab refuses requests without its token
+  [PASS] Code running in Jupyter can't become root through sudo
+  [PASS] Jupyter's login token stays out of the system journal
+  [PASS] Jupyter's sandbox is in place (sgs-jupyter@jm.service: exposure 2.2 by systemd-analyze security)
+  [PASS] Ordinary users and containers can't reach the cloud metadata service (169.254.169.254)
+         Outbound traffic isn't limited (for sensitive work: sudo sgs-egress strict)
+  [PASS] Firewall blocks incoming connections by default
+
+== Kernel and audit
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, io_uring or line-discipline loading, no setuid core dumps, ptrace and perf limits, no ICMP redirects)
+  [PASS] Kernel lockdown is on (integrity): even root can't load unsigned modules or write kernel memory
+  [PASS] Ordinary users can't create user namespaces, even through aa-exec (tried 1password Discord QtWebEngineProcess)
+  [PASS] Audit log records changes to package sources, sudo, SSH, Docker, GPU hooks and the stack (23 rules)
+
+== Secrets
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+  [PASS] No cron job, service, startup file, login hook or SSH key changed since it was last accepted
+
+== SSH
+  [PASS] Password login is off
+  [PASS] Root can't log in
+  [PASS] X11 forwarding is off (a compromised server can't reach your desktop)
+  [PASS] This check re-runs daily, and the login message shows its latest result (sgs-check.timer)
+
+== Updates
+  [PASS] No pending security updates
+         1 other (non-security) updates available
+  [PASS] Automatic security updates are on
+  [PASS] Automatic updates cover Docker, the NVIDIA Container Toolkit, CUDA, cuDNN and NCCL
+  [PASS] Automatic updates completed a run in the last 3 days
+  [PASS] apt's daily jobs have a time limit, so a hung download can't block updates for good
+  [PASS] No reboot needed
+
+== GPU test
+         GPU 0: NVIDIA GeForce GTX 1070 with Max-Q Design (UUID: GPU-c84f617b-e565-caf4-912c-775da4768ff1)
+  [SKIP] PyTorch 2.15.0+cu132 can't use this GPU (compute capability 6.1; its CUDA build needs 7.5+)
+  [SKIP] JAX 0.12.0.1 can't use this GPU (compute capability 6.1; its CUDA build needs 7.5+)
+  [PASS] TensorFlow 2.21.0: 3.7 TFLOP/s (fp32 matmul) on device:GPU:0
+
+== Result: 55 PASS, 3 WARN, 2 SKIP

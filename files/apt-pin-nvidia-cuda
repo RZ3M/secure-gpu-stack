@@ -1,0 +1,10 @@
+# Secure GPU Stack: take the NVIDIA driver from Ubuntu's archive, not NVIDIA's
+# CUDA repository. Ubuntu's driver packages are signed by Ubuntu, come with
+# prebuilt kernel modules, and get security fixes through noble-security.
+# NVIDIA's CUDA repository publishes its own builds under the same names;
+# priority -1 stops apt from ever choosing those. Everything else from NVIDIA's
+# repository (CUDA toolkit, cuDNN, NCCL, Container Toolkit) keeps the normal
+# priority.
+Package: nvidia-driver-* nvidia-dkms-* nvidia-kernel-* nvidia-headless-* nvidia-utils-* nvidia-compute-utils-* nvidia-firmware-* nvidia-fabricmanager* nvidia-imex* nvidia-open* cuda-drivers* libnvidia-cfg1-* libnvidia-common-* libnvidia-compute-* libnvidia-decode-* libnvidia-encode-* libnvidia-extra-* libnvidia-fbc1-* libnvidia-gl-* libnvidia-nscq-* xserver-xorg-video-nvidia-*
+Pin: origin developer.download.nvidia.com
+Pin-Priority: -1

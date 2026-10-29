@@ -1,0 +1,17 @@
+{
+  "ip": "127.0.0.1",
+  "default-network-opts": {
+    "bridge": {
+      "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1"
+    }
+  },
+  "icc": false,
+  "no-new-privileges": true,
+  "live-restore": true,
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "3"
+  },
+  "cgroup-parent": "docker.slice"
+}

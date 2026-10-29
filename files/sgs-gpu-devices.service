@@ -1,0 +1,10 @@
+# Secure GPU Stack: started by 72-sgs-nvidia-devices.rules when the driver or
+# nvidia_uvm loads.
+[Unit]
+Description=Limit the GPU device files to the video group and lock them
+# Locked before these open or reset them.
+Before=nvidia-cdi-refresh.service nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sgs-gpu-devices

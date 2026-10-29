@@ -1,0 +1,21 @@
+== Jupyter
+  [PASS] JupyterLab is not reachable directly on 192.168.252.6:8888
+Warning: Permanently added '192.168.252.6' (ED25519) to the list of known hosts.
+  [PASS] JupyterLab works through an SSH tunnel
+== SSH
+  [PASS] root login refused
+  [PASS] password login refused
+== Docker-published ports
+Unable to find image 'busybox:latest' locally
+latest: Pulling from library/busybox
+55d2dadd4bbc: Pulling fs layer
+622159812b01: Download complete
+55d2dadd4bbc: Download complete
+55d2dadd4bbc: Pull complete
+Digest: sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+Status: Downloaded newer image for busybox:latest
+  [PASS] 'docker run -p 8080:8080' stays on localhost by default
+  [NOTE] 'docker run -p 0.0.0.0:8081:8080' IS reachable, even with the firewall on:
+         Docker writes its own firewall rules. That's why the default matters.
+
+== Nothing reachable that shouldn't be

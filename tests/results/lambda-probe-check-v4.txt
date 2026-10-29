@@ -1,0 +1,60 @@
+
+== Machine
+  Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic, arm64
+  NVIDIA GPUs: 0
+  Stack: Lambda Stack
+
+== Package sources
+  [WARN] archive.lambdalabs.com: plain HTTP, key not limited to this source
+  [WARN] lambda-keyring.gpg is trusted for every repository, not just its own
+  [WARN] Pin at 1001 overrides other sources and allows downgrades: /etc/apt/preferences.d/lambda-repository
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [SKIP] No NVIDIA driver or GPU on this machine
+
+== Containers
+  [WARN] NVIDIA Container Toolkit 1.18.1 is older than 1.19.1 (CVE-2026-24260)
+  [SKIP] Docker not installed
+
+== Python ML stack
+         Stack is mixed into the OS's own Python (/usr/lib/python3/dist-packages)
+         torch 2.7.0   keras 3.10.0   jax 0.6.0
+  [PASS] Stack packages are read-only for users
+  [PASS] Commands first on everyone's PATH can only be changed by root
+  [PASS] No system CUDA libraries override the stack's
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [WARN] 44 vulnerability advisories in 3 of 166 Python packages
+           keras 3.10.0: 28  (lambda package)
+           torch 2.7.0: 15  (lambda package)
+           fsspec 2024.3.1: 1  (lambda package)
+         Not counted: 258 matches in 31 packages Ubuntu maintains (Ubuntu often fixes these without changing the version)
+
+== Network exposure
+  [PASS] Only SSH listens on the network
+         JupyterLab isn't running
+  [WARN] Firewall is off: every listening program is reachable
+
+== Kernel and audit
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, ptrace and perf limits)
+  [WARN] auditd isn't installed: changes leave no audit trail
+
+== Secrets
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+
+== SSH
+  [PASS] Password login is off
+  [WARN] Root login allowed (without-password)
+
+== Updates
+  [WARN] 9 security updates waiting to be installed
+         8 other (non-security) updates available
+  [PASS] Automatic security updates are on
+  [WARN] Automatic updates skip these container packages: nvidia-container-toolkit (lambdalabs.com / Lambda Labs Ubuntu repository (Noble)), libnvidia-container1 (lambdalabs.com / Lambda Labs Ubuntu repository (Noble))
+         Automatic updates haven't completed a run yet
+  [WARN] apt's daily jobs have no time limit: one hung download can block every update
+  [PASS] No reboot needed
+
+== Result: 13 PASS, 11 WARN, 2 SKIP

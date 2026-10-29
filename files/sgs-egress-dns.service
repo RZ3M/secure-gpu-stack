@@ -1,0 +1,13 @@
+# Secure GPU Stack: the resolver for strict mode (sgs-egress strict). It
+# answers only for the domains in /etc/sgs/egress-allow and adds their
+# addresses to the firewall's allow set. Started and stopped by sgs-egress.
+[Unit]
+Description=Secure GPU Stack strict-mode resolver
+After=network.target
+Before=systemd-resolved.service
+
+[Service]
+# dnsmasq starts as root to bind port 53, then drops to sgs-egress, keeping
+# only the capability it needs to update the firewall set.
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/sgs/egress-dnsmasq.conf --user=sgs-egress --group=sgs-egress --pid-file=
+Restart=on-failure

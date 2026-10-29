@@ -1,0 +1,20 @@
+# Secure GPU Stack: loads /etc/sgs/guard.nft (cloud metadata for root only)
+# before networking starts, the way ufw loads its rules.
+[Unit]
+Description=Secure GPU Stack network guard
+DefaultDependencies=no
+# The rules name docker.slice (where Docker puts every container), which has
+# to exist when they load.
+After=local-fs.target docker.slice
+Before=network-pre.target shutdown.target
+Wants=network-pre.target docker.slice
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/sgs/guard.nft
+ExecStop=/usr/sbin/nft delete table inet sgs_guard
+
+[Install]
+WantedBy=multi-user.target

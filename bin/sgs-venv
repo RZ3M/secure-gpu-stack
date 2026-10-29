@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# sgs-venv PATH: create your own Python environment on top of the stack.
+#
+# The stack in /opt/sgs/venv is read-only, so `pip install` can't change it by
+# accident. Your environment sees every stack package (torch, tensorflow, jax,
+# ...) and anything you install there takes priority. This matches Lambda
+# Stack's advice to use `--system-site-packages`.
+#
+# The environment reuses the stack's hash-verified pip instead of downloading
+# another copy.
+set -euo pipefail
+
+STACK_SITE="/opt/sgs/venv/lib/python3.12/site-packages"
+
+if [ $# -ne 1 ] || [ "${1:0:1}" = "-" ]; then
+  echo "usage: sgs-venv PATH" >&2
+  exit 2
+fi
+[ -d "$STACK_SITE" ] || { echo "sgs-venv: the stack isn't installed ($STACK_SITE missing)" >&2; exit 1; }
+# A folder someone else owns (say a pre-created /tmp/env) lets them swap your
+# environment's python or its .pth files after you've built it.
+if [ -e "$1" ] && [ -n "$(find "$1" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+  echo "sgs-venv: $1 has files that belong to another user; pick a path you own" >&2
+  exit 1
+fi
+
+/usr/bin/python3.12 -m venv --without-pip "$1"
+site="$("$1/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+# addsitedir, unlike a bare path line, also runs the stack's own .pth files,
+# such as the hook that lets TensorFlow find its cuSOLVER library.
+echo "import site; site.addsitedir('$STACK_SITE')" > "$site/sgs-stack.pth"
+
+# pip comes from the stack and installs into this environment.
+for name in pip pip3; do
+  printf '#!/bin/sh\nexec "%s/bin/python" -m pip "$@"\n' "$(cd "$1" && pwd)" > "$1/bin/$name"
+  chmod 0755 "$1/bin/$name"
+done
+
+# Last, after every file exists, so none is left writable by others under a
+# loose umask (its .pth file runs code in every Python started from it).
+chmod -R go-w "$1"
+
+cat <<EOF
+Created $1 on top of Secure GPU Stack.
+  Activate:  source $1/bin/activate
+  Install:   pip install <package>   (goes into $1; the stack stays untouched)
+EOF

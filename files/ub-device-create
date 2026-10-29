@@ -1,0 +1,6 @@
+#!/bin/sh
+# Secure GPU Stack: stands in for Ubuntu's ub-device-create, which udev runs
+# when the driver loads and which creates the GPU device files 0666. install.sh
+# diverted the original to /sbin/ub-device-create.distrib. This creates them
+# 0660 for the video group from the start; sgs-gpu-devices.service locks them.
+exec /usr/local/sbin/sgs-gpu-devices --no-lock

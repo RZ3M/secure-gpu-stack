@@ -1,0 +1,17 @@
+== The stack works like Lambda Stack
+  [PASS] python3 is the stack's Python
+  [PASS] torch, tensorflow, jax, keras import: 2.15.0+cu132 2.21.0 0.12.0.1 3.15.1
+  [PASS] nvcc: release 13.0
+== The stack can't be changed by accident
+  [PASS] pip install into the stack is refused (it's read-only)
+== Users get their own environment on top
+  [PASS] sgs-venv sees the stack's torch and keeps new packages in its own folder
+== Jupyter is up, on localhost only
+  [PASS] JupyterLab answers on 127.0.0.1:8888
+  [PASS] JupyterLab doesn't answer on the network address (192.168.252.6)
+== Malicious model files are caught
+  [PASS] modelscan flags the booby-trapped model.pt
+  [PASS] modelscan flags the booby-trapped model.pkl
+  [PASS] torch.load refuses to run the model's hidden code (weights_only default)
+
+== All user checks passed

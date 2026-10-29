@@ -1,0 +1,81 @@
+# Secure GPU Stack: JupyterLab for one user, on a Unix socket only that user
+# can open (/run/sgs-jupyter/USER/jupyter.sock, mode 0600). A localhost port
+# would be reachable by every account on the machine and every container on
+# the host network. Connect through an SSH tunnel to the socket; run
+# `sgs-jupyter` for the exact command. Kernels talk to it over Unix sockets in
+# the same private folder, not localhost ports. Every endpoint needs the token,
+# including ones an extension forgot to protect (allow_unauthenticated_access=
+# False; Jupyter Server defaults it to True).
+[Unit]
+Description=JupyterLab for %i (private socket)
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=~
+Environment=PATH=/opt/sgs/venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# /run/sgs-jupyter/%i, owned by the user, mode 0700, removed when it stops.
+RuntimeDirectory=sgs-jupyter/%i
+RuntimeDirectoryMode=0700
+# The token is generated once into a file only the user can read and passed in
+# as JUPYTER_TOKEN. A token Jupyter generated itself would be logged in its
+# startup URL, into the system journal, which everyone in the adm group can
+# read; one it was given is logged only as the literal text "token=...". A
+# token file that isn't 48 hex digits (truncated, or a hand-picked password)
+# is replaced. ($$ is a literal $ for systemd.)
+ExecStart=/bin/sh -c 'umask 077; d="$$HOME/.local/share/jupyter"; mkdir -p "$$d"; grep -qxE "[0-9a-f]{48}" "$$d/sgs-token" 2>/dev/null || /opt/sgs/venv/bin/python -I -c "import secrets; print(secrets.token_hex(24))" > "$$d/sgs-token"; chmod 600 "$$d/sgs-token"; JUPYTER_TOKEN="$$(cat "$$d/sgs-token")" exec /opt/sgs/venv/bin/jupyter lab --no-browser --ServerApp.sock="$$RUNTIME_DIRECTORY/jupyter.sock" --ServerApp.sock_mode=0600 --KernelManager.transport=ipc --KernelManager.ip="$$RUNTIME_DIRECTORY/kernel" --ServerApp.allow_remote_access=False --ServerApp.allow_unauthenticated_access=False'
+Restart=on-failure
+PrivateTmp=yes
+# Code running in a notebook (a malicious package, a booby-trapped model) can't
+# become root through sudo or a setuid program, so it can't touch the stack or
+# sgs-check. The trade-off: `!sudo ...` in a notebook fails; use an SSH session.
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+# A sandbox notebooks don't notice: everything below is something notebook
+# code has no business doing, so a malicious package or model loaded in one
+# reaches less of the kernel and the machine (systemd-analyze security: 8.5
+# EXPOSED without it). Left out on purpose: MemoryDenyWriteExecute (breaks
+# the JIT compilers Triton, torch.compile, numba and JAX use), RemoveIPC
+# (would delete the user's shared memory, a training run's /dev/shm included,
+# whenever Jupyter restarts) and ProtectHome (notebooks work in your home).
+CapabilityBoundingSet=
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Other users' processes (and the secrets in their command lines) are hidden.
+ProtectProc=invisible
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @module @mount @obsolete @raw-io @reboot @swap
+# NCCL and psutil list interfaces over netlink.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# The Docker socket is root for whoever can reach it: if the user is in the
+# docker group, notebook code mustn't be able to.
+InaccessiblePaths=-/run/docker.sock
+# Devices: the GPU (and DRM, for EGL rendering), InfiniBand verbs for
+# multi-node NCCL (untested here), and terminals for Jupyter's own terminal;
+# /dev/null, zero, random and the like are always allowed.
+#
+# Also deliberately out of reach from notebooks: mounting (FUSE tools like
+# s3fs or gcsfuse; mount datasets on the host instead), new namespaces
+# (rootless podman, unshare) and the Docker CLI. Use an SSH session for those.
+DevicePolicy=closed
+DeviceAllow=char-nvidia rw
+DeviceAllow=char-nvidia-uvm rw
+DeviceAllow=char-nvidia-caps r
+DeviceAllow=char-nvidia-caps-imex-channels rw
+DeviceAllow=char-drm rw
+DeviceAllow=char-infiniband_verbs rw
+DeviceAllow=/dev/ptmx rw
+DeviceAllow=char-pts rw
+DeviceAllow=/dev/tty rw
+
+[Install]
+WantedBy=multi-user.target

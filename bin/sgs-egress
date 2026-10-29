@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# sgs-egress: an optional strict mode for outbound traffic, for sensitive work.
+#
+#   sudo sgs-egress strict    only the domains in /etc/sgs/egress-allow
+#   sudo sgs-egress open      back to normal
+#   sgs-egress status
+#
+# In strict mode, ordinary users' programs (notebooks, training jobs, pip) can
+# reach only the domains listed in /etc/sgs/egress-allow, over HTTP and HTTPS.
+# A local resolver (dnsmasq) answers only for those domains, and adds their
+# addresses to a firewall set as it looks them up, so CDN addresses that change
+# keep working. Everything else is refused: other domains, raw IP addresses,
+# other DNS servers. Containers get no new outbound connections at all. DHCP,
+# NTP and IPv6 neighbor discovery still work, so the machine stays on the
+# network.
+#
+# Root's traffic isn't filtered (root is out of scope: docs/threat-model.md),
+# but every lookup, root's included, goes through the strict resolver, so the
+# list includes what the system itself needs: Ubuntu, NVIDIA, Docker,
+# Canonical's services and Tailscale. Limits: a domain on a shared CDN shares
+# its addresses with other sites there, and a program can still leak a little
+# through which allowed names it looks up.
+set -euo pipefail
+
+ALLOW=/etc/sgs/egress-allow
+STATE=/etc/sgs/egress-mode
+DNS_CONF=/etc/sgs/egress-dnsmasq.conf
+NFT_RULES=/etc/sgs/egress.nft
+RESOLVED_DROPIN=/etc/systemd/resolved.conf.d/60-sgs-egress.conf
+DNS_ADDR=127.0.0.2
+DNS_USER=sgs-egress
+
+die() { echo "sgs-egress: $*" >&2; exit 1; }
+need_root() { [ "$(id -u)" -eq 0 ] || die "run it with sudo"; }
+domains() { grep -vE '^[[:space:]]*(#|$)' "$ALLOW" | tr -d ' \t' | sort -u; }
+mode() { cat "$STATE" 2>/dev/null || echo open; }
+# Enabling or disabling the boot unit changes a file sgs-check watches for
+# persistence: accept that change, and only what changed meanwhile.
+with_startup_accept() {
+  local before
+  before=$(mktemp)
+  if /usr/local/bin/sgs-check --list-startup-files > "$before" 2>/dev/null; then
+    "$@"
+    /usr/local/bin/sgs-check --accept-changes-since "$before" >/dev/null 2>&1 || true
+  else
+    "$@"
+  fi
+  rm -f "$before"
+}
+
+write_config() {
+  [ -r "$ALLOW" ] || die "no allow list at $ALLOW"
+  id "$DNS_USER" >/dev/null 2>&1 || die "the $DNS_USER account is missing (rerun install.sh)"
+  command -v dnsmasq >/dev/null || die "dnsmasq isn't installed (rerun install.sh)"
+  local uid up d s svc u
+  uid=$(id -u "$DNS_USER")
+  # DHCP and time sync, by the system accounts that do them, not anyone.
+  svc=""
+  for u in systemd-network systemd-timesync _chrony; do
+    id -u "$u" >/dev/null 2>&1 && svc="$svc${svc:+, }$(id -u "$u")"
+  done
+  local svc_rule="" uplinks
+  [ -z "$svc" ] || svc_rule="meta skuid { $svc } udp dport { 67, 123, 547 } accept"
+  # The interfaces default routes leave by (and Tailscale's), whatever the
+  # container bridges are called.
+  uplinks=$( { ip -o route show default; ip -o -6 route show default; } 2>/dev/null \
+             | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") print "\"" $(i + 1) "\"" }'; \
+             if [ -e /sys/class/net/tailscale0 ]; then echo '"tailscale0"'; fi)
+  uplinks=$(echo "$uplinks" | sort -u | paste -sd, -)
+  [ -n "$uplinks" ] || die "no default route: can't tell which interface leads out"
+  # The upstream servers systemd-resolved knows, minus our own resolver.
+  up=$(awk '$1 == "nameserver" && $2 !~ /^(127\.|::1|fe80:)/ { print $2 }' /run/systemd/resolve/resolv.conf 2>/dev/null | sort -u)
+  [ -n "$up" ] || die "no upstream DNS server in /run/systemd/resolve/resolv.conf"
+  {
+    echo "# Written by sgs-egress; regenerated on every start. Edit $ALLOW instead."
+    echo "listen-address=$DNS_ADDR"
+    echo "bind-interfaces"
+    echo "no-resolv"
+    echo "no-hosts"
+    echo "cache-size=2000"
+    # Only listed domains are forwarded: anything else gets no answer.
+    for d in $(domains); do
+      for s in $up; do echo "server=/$d/$s"; done
+      echo "nftset=/$d/4#inet#sgs_egress#allow4,6#inet#sgs_egress#allow6"
+    done
+  } > "$DNS_CONF.new"
+  mv "$DNS_CONF.new" "$DNS_CONF"
+  # "table ...; delete table ..." first, so loading it again replaces it.
+  cat > "$NFT_RULES" <<EOF
+# Written by sgs-egress; regenerated on every start.
+table inet sgs_egress
+delete table inet sgs_egress
+table inet sgs_egress {
+  set allow4 { type ipv4_addr; }
+  set allow6 { type ipv6_addr; }
+  chain output {
+    type filter hook output priority filter; policy accept;
+    oifname "lo" accept
+    ct state established,related accept
+    # Containers on the host's network send from here, often as root: no new
+    # outbound connections for them either (Docker puts them in docker.slice).
+    socket cgroupv2 level 1 "docker.slice" oifname != "lo" ct state new reject with icmpx admin-prohibited
+    meta skuid 0 accept
+    meta skuid $uid meta l4proto { tcp, udp } th dport 53 accept
+    $svc_rule
+    icmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert, mld-listener-report, mld2-listener-report } accept
+    ip daddr @allow4 tcp dport { 80, 443 } accept
+    ip6 daddr @allow6 tcp dport { 80, 443 } accept
+    limit rate 6/minute log prefix "sgs-egress refused: " level info
+    reject with icmpx admin-prohibited
+  }
+  # Whatever the bridges are called: a new forwarded connection leaving by an
+  # uplink (a container going out) is refused; containers can still talk to
+  # each other.
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+    ct state established,related accept
+    ct state new oifname { $uplinks } reject with icmpx admin-prohibited
+  }
+}
+EOF
+}
+
+apply() {
+  write_config
+  systemctl start docker.slice
+  nft -f "$NFT_RULES"
+  systemctl restart sgs-egress-dns.service
+  install -d -m 0755 "$(dirname "$RESOLVED_DROPIN")"
+  printf '# Written by sgs-egress strict: every lookup goes through its resolver.\n[Resolve]\nDNS=%s\nDomains=~.\n' "$DNS_ADDR" > "$RESOLVED_DROPIN"
+  systemctl restart systemd-resolved.service
+  resolvectl flush-caches 2>/dev/null || true
+}
+
+case "${1:-status}" in
+  strict)
+    need_root
+    apply
+    echo strict > "$STATE"
+    with_startup_accept systemctl enable --quiet sgs-egress.service
+    echo "Strict mode on: $(domains | wc -l) allowed domains ($ALLOW)."
+    # Show it working, as an ordinary account would see it.
+    first=$(domains | head -1)
+    if runuser -u nobody -- curl -s -o /dev/null -m 10 "https://$first/" 2>/dev/null; then
+      echo "  $first: reachable"
+    else
+      echo "  $first: NOT reachable (check the allow list and sudo journalctl -u sgs-egress-dns)"
+    fi
+    if runuser -u nobody -- curl -s -o /dev/null -m 10 https://example.com/ 2>/dev/null; then
+      echo "  example.com: reachable, which strict mode should prevent" >&2
+    else
+      echo "  example.com: refused, as intended"
+    fi
+    ;;
+  open)
+    need_root
+    echo open > "$STATE"
+    with_startup_accept systemctl disable --quiet sgs-egress.service || true
+    nft delete table inet sgs_egress 2>/dev/null || true
+    systemctl stop sgs-egress-dns.service 2>/dev/null || true
+    rm -f "$RESOLVED_DROPIN"
+    systemctl restart systemd-resolved.service
+    echo "Strict mode off: outbound traffic is back to normal."
+    ;;
+  boot)
+    # sgs-egress.service: put strict mode back after a reboot.
+    need_root
+    [ "$(mode)" = strict ] && apply
+    ;;
+  status)
+    if [ "$(mode)" = strict ]; then
+      # Reading the firewall needs root; without it, say less rather than fail.
+      if n4=$(nft list set inet sgs_egress allow4 2>/dev/null | grep -oE '([0-9]+\.){3}[0-9]+' | wc -l) && [ "$(id -u)" -eq 0 ]; then
+        echo "Strict mode: on. $(domains | wc -l) allowed domains in $ALLOW; $n4 IPv4 addresses looked up so far."
+      else
+        echo "Strict mode: on. $(domains | wc -l) allowed domains in $ALLOW (sudo sgs-egress status for more)."
+        exit 0
+      fi
+      nft list table inet sgs_egress >/dev/null 2>&1 || echo "  But the firewall rules aren't loaded: sudo sgs-egress strict" >&2
+      systemctl is-active --quiet sgs-egress-dns.service || echo "  But its resolver isn't running: sudo sgs-egress strict" >&2
+      resolvectl dns 2>/dev/null | grep -q '127\.0\.0\.2' || echo "  But lookups don't go through its resolver: sudo sgs-egress strict" >&2
+    else
+      echo "Strict mode: off (sudo sgs-egress strict limits outbound traffic to $ALLOW)."
+    fi
+    ;;
+  *)
+    sed -n '2,7p' "$0"; exit 2 ;;
+esac

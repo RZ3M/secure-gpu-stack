@@ -1,0 +1,54 @@
+
+== Machine
+  Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic, arm64
+  NVIDIA GPUs: 0
+  Stack: Secure GPU Stack 0.1.0
+
+== Package sources
+  [PASS] download.docker.com: HTTPS, key limited to this source
+  [PASS] developer.download.nvidia.com: HTTPS, key limited to this source
+  [PASS] No third-party key is trusted for every repository
+  [PASS] No apt pin can override Ubuntu's updates or force downgrades
+
+== NVIDIA driver
+  [SKIP] No NVIDIA driver or GPU on this machine
+
+== Containers
+  [PASS] NVIDIA Container Toolkit 1.20.1
+  [PASS] Nobody is in the root-equivalent docker group
+  [PASS] Published container ports stay on localhost unless asked otherwise
+  [PASS] Containers can't gain privileges through setuid programs
+  [PASS] Containers get the GPU only when asked (--gpus or --device)
+
+== Python ML stack
+  [PASS] Stack lives in its own environment, separate from the OS's Python
+         torch 2.15.0   tensorflow 2.21.0   keras 3.15.1   jax 0.12.0.1   jupyterlab 4.6.4   
+  [PASS] Stack packages are read-only for users
+  [PASS] No system CUDA libraries override the stack's
+  [PASS] pip uses a single package index
+  [PASS] No known vulnerabilities in 161 Python packages
+  [PASS] All 54215 installed files match what their packages recorded
+
+== Network exposure
+  [PASS] Only SSH listens on the network
+  [PASS] JupyterLab only listens on localhost (reach it with an SSH tunnel)
+  [PASS] JupyterLab refuses requests without its token
+  [PASS] Firewall blocks incoming connections by default
+
+== Kernel and audit
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, ptrace and perf limits)
+  [PASS] Audit log records changes to package sources, sudo, SSH, Docker, GPU hooks and the stack (13 rules)
+
+== SSH
+  [PASS] Password login is off
+  [PASS] Root can't log in
+
+== Updates
+  [PASS] No pending security updates
+         8 other (non-security) updates available
+  [PASS] Automatic security updates are on
+         Automatic updates haven't completed a run yet
+  [PASS] apt's daily jobs have a time limit, so a hung download can't block updates for good
+  [PASS] No reboot needed
+
+== Result: 27 PASS, 0 WARN, 1 SKIP

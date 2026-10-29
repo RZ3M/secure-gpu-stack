@@ -1,0 +1,14 @@
+# Secure GPU Stack: puts strict mode (sgs-egress strict) back after a reboot.
+# Enabled only while strict mode is on.
+[Unit]
+Description=Secure GPU Stack strict outbound mode
+After=network-online.target systemd-resolved.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/sgs-egress boot
+
+[Install]
+WantedBy=multi-user.target

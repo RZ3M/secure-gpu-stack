@@ -1,0 +1,137 @@
+
+==> Checking this machine
+Hit:1 https://download.docker.com/linux/ubuntu noble InRelease
+Hit:2 https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa  InRelease
+Hit:3 http://ports.ubuntu.com/ubuntu-ports noble InRelease
+Hit:4 http://ports.ubuntu.com/ubuntu-ports noble-updates InRelease
+Hit:5 http://ports.ubuntu.com/ubuntu-ports noble-backports InRelease
+Hit:6 http://ports.ubuntu.com/ubuntu-ports noble-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+ca-certificates is already the newest version (20260816ubuntu0.24.04.1).
+curl is already the newest version (8.5.0-2ubuntu10.16).
+gnupg is already the newest version (2.4.4-2ubuntu17.6).
+pciutils is already the newest version (1:3.10.0-2build1).
+0 upgraded, 0 newly installed, 0 to remove and 8 not upgraded.
+    Ubuntu 24.04 on arm64, kernel 6.8.0-147-generic (generic line)
+    NVIDIA GPUs found: 0
+    Jupyter user: ubuntu
+
+==> Adding package sources (HTTPS, each with its own verified key)
+    nvidia-cuda key verified: EB693B3035CD5710E231E123A4B469963BF863CC
+    docker key verified: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+Hit:1 https://download.docker.com/linux/ubuntu noble InRelease
+Hit:2 http://ports.ubuntu.com/ubuntu-ports noble InRelease
+Hit:3 https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa  InRelease
+Hit:4 http://ports.ubuntu.com/ubuntu-ports noble-updates InRelease
+Hit:5 http://ports.ubuntu.com/ubuntu-ports noble-backports InRelease
+Hit:6 http://ports.ubuntu.com/ubuntu-ports noble-security InRelease
+Reading package lists...
+
+==> Hardening SSH, the firewall and automatic updates
+Reading package lists...
+Building dependency tree...
+Reading state information...
+openssh-server is already the newest version (1:9.6p1-3ubuntu13.20).
+ufw is already the newest version (0.36.2-6).
+unattended-upgrades is already the newest version (2.9.1+nmu4ubuntu1).
+auditd is already the newest version (1:3.1.2-2.1ubuntu0.1).
+0 upgraded, 0 newly installed, 0 to remove and 8 not upgraded.
+    SSH: keys only, no root login
+    Firewall: incoming blocked except SSH
+    Automatic security updates (with time limits) and audit logging on
+    Kernel hardening settings pinned (/etc/sysctl.d/60-sgs.conf)
+    Pending security updates applied
+
+==> NVIDIA driver R580 from Ubuntu's archive
+    No NVIDIA GPU here, so the driver isn't installed. Checking it would resolve:
+    OK: linux-headers-generic linux-modules-nvidia-580-server-open-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server
+
+==> CUDA toolkit, cuDNN and NCCL from NVIDIA's repository
+Reading package lists...
+Building dependency tree...
+Reading state information...
+cuda-toolkit-13-0 is already the newest version (13.0.3-1).
+libcudnn9-cuda-13 is already the newest version (9.27.0.42-1).
+libcudnn9-dev-cuda-13 is already the newest version (9.27.0.42-1).
+libnccl2 is already the newest version (2.28.9-1+cuda13.0).
+libnccl-dev is already the newest version (2.28.9-1+cuda13.0).
+0 upgraded, 0 newly installed, 0 to remove and 8 not upgraded.
+    Installed cuda-toolkit-13-0, cuDNN 9, NCCL 2.28.9-1+cuda13.0
+
+==> Docker Engine and the NVIDIA Container Toolkit
+Reading package lists...
+Building dependency tree...
+Reading state information...
+docker-ce is already the newest version (5:29.9.2-1~ubuntu.24.04~noble).
+docker-ce-cli is already the newest version (5:29.9.2-1~ubuntu.24.04~noble).
+containerd.io is already the newest version (2.4.2-3~ubuntu.24.04~noble).
+docker-buildx-plugin is already the newest version (0.38.1-1~ubuntu.24.04~noble).
+docker-compose-plugin is already the newest version (5.6.1-1~ubuntu.24.04~noble).
+nvidia-container-toolkit is already the newest version (1.20.1-1).
+0 upgraded, 0 newly installed, 0 to remove and 8 not upgraded.
+time="2026-10-29T08:52:37-04:00" level=info msg="Loading config from /etc/docker/daemon.json"
+time="2026-10-29T08:52:37-04:00" level=info msg="Wrote updated config to /etc/docker/daemon.json"
+time="2026-10-29T08:52:37-04:00" level=info msg="It is recommended that docker daemon be restarted."
+    Docker 29.9.2, Container Toolkit 1.20.1
+    Container ports publish to 127.0.0.1 by default
+    Nobody is in the docker group; use sudo docker
+
+==> Python ML stack in /opt/sgs/venv (hash-verified wheels only)
+Reading package lists...
+Building dependency tree...
+Reading state information...
+python3-venv is already the newest version (3.12.3-0ubuntu2.1).
+python3-dev is already the newest version (3.12.3-0ubuntu2.1).
+build-essential is already the newest version (12.10ubuntu1).
+git is already the newest version (1:2.43.0-1ubuntu7.4).
+0 upgraded, 0 newly installed, 0 to remove and 8 not upgraded.
+    jax==0.12.0.1 jupyterlab==4.6.4 keras==3.15.1 tensorflow==2.21.0 torch==2.15.0 
+
+==> TensorFlow's CUDA 12 libraries in /opt/sgs/tf-cuda12
+    Loaded for TensorFlow only (files/sgs_cuda_preload.py)
+
+==> Security tools in /opt/sgs/tools (pip-audit, modelscan)
+
+==> Commands and the Jupyter service
+Reading package lists...
+Building dependency tree...
+Reading state information...
+nftables is already the newest version (1.0.9-1ubuntu0.1).
+nftables set to manually installed.
+Recommended packages:
+  dns-root-data
+The following NEW packages will be installed:
+  dnsmasq-base
+0 upgraded, 1 newly installed, 0 to remove and 8 not upgraded.
+Need to get 370 kB of archives.
+After this operation, 893 kB of additional disk space will be used.
+Get:1 http://ports.ubuntu.com/ubuntu-ports noble-updates/main arm64 dnsmasq-base arm64 2.91-0ubuntu0.24.04.2 [370 kB]
+Fetched 370 kB in 1s (378 kB/s)
+Selecting previously unselected package dnsmasq-base.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 85912 files and directories currently installed.)
+Preparing to unpack .../dnsmasq-base_2.91-0ubuntu0.24.04.2_arm64.deb ...
+Unpacking dnsmasq-base (2.91-0ubuntu0.24.04.2) ...
+Setting up dnsmasq-base (2.91-0ubuntu0.24.04.2) ...
+Processing triggers for dbus (1.14.10-4ubuntu4.1) ...
+Processing triggers for man-db (2.12.0-4build2) ...
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+    JupyterLab running for ubuntu on a private socket (sgs-jupyter shows how to connect)
+
+==> Audit rules for the machine's trust roots
+    17 rules in /etc/audit/rules.d/60-sgs.rules (read with: sudo ausearch -k sgs-)
+    Software bill of materials: /opt/sgs/sbom.cdx.json
+
+==> Secure GPU Stack 0.1.0 is installed
+    Check it:   sgs-check

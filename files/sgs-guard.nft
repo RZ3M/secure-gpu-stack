@@ -1,0 +1,30 @@
+# Secure GPU Stack: ordinary users and containers can't reach a cloud
+# metadata service: 169.254.169.254 (used by most clouds), ECS's 169.254.170.2,
+# and the IPv6 addresses AWS and Google use. (Not Azure's 168.63.129.16: Azure
+# machines use it for DNS too.) Root can:
+# cloud-init reads the machine's configuration there. On some clouds the
+# metadata service hands out credentials or the user data given at launch,
+# which a malicious package, or a container a web request tricks into asking
+# (SSRF), would otherwise read. Loaded by sgs-guard.service before networking
+# starts; "table ...; delete table ..." first, so loading it again replaces it.
+table inet sgs_guard
+delete table inet sgs_guard
+table inet sgs_guard {
+  chain output {
+    type filter hook output priority filter; policy accept;
+    ip daddr 169.254.169.254 meta skuid != 0 reject with icmpx admin-prohibited
+    ip daddr 169.254.170.2 meta skuid != 0 reject with icmpx admin-prohibited
+    ip6 daddr { fd00:ec2::254, fd20:ce::254 } meta skuid != 0 reject with icmpx admin-prohibited
+    # A container on the host's network sends from here, and as root if it
+    # runs as root; Docker puts every container under docker.slice.
+    socket cgroupv2 level 1 "docker.slice" ip daddr 169.254.169.254 reject with icmpx admin-prohibited
+    socket cgroupv2 level 1 "docker.slice" ip daddr 169.254.170.2 reject with icmpx admin-prohibited
+    socket cgroupv2 level 1 "docker.slice" ip6 daddr { fd00:ec2::254, fd20:ce::254 } reject with icmpx admin-prohibited
+  }
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+    ip daddr 169.254.169.254 reject with icmpx admin-prohibited
+    ip daddr 169.254.170.2 reject with icmpx admin-prohibited
+    ip6 daddr { fd00:ec2::254, fd20:ce::254 } reject with icmpx admin-prohibited
+  }
+}

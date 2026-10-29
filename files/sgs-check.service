@@ -1,0 +1,20 @@
+# Secure GPU Stack: the daily posture check (sgs-check.timer). Its result is
+# kept in /var/lib/sgs/last-check, which the login message summarizes, so a
+# loosened setting or a new exposure shows up without anyone running it.
+[Unit]
+Description=Secure GPU Stack daily posture check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# sgs-check exits 1 when it has a WARN: that's a result, not a failure. A run
+# that didn't finish (no result line) keeps the previous result and fails.
+SuccessExitStatus=1
+TimeoutStartSec=30min
+StateDirectory=sgs
+StateDirectoryMode=0700
+# Root-only: the login message runs as root (pam_motd) and shows a summary.
+ExecStart=/bin/sh -c 'umask 077; /usr/local/bin/sgs-check > /var/lib/sgs/last-check.new 2>&1; rc=$$?; if grep -q "^== Result: " /var/lib/sgs/last-check.new; then mv /var/lib/sgs/last-check.new /var/lib/sgs/last-check; exit $$rc; fi; exit 2'
+Nice=10
+IOSchedulingClass=idle

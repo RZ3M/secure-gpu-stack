@@ -1,0 +1,4 @@
+none [integrity] confidentiality
+0
+  [PASS] Kernel lockdown is on (integrity): even root can't load unsigned modules or write kernel memory
+== Result: 47 PASS, 0 WARN, 1 SKIP

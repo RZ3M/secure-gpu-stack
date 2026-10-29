@@ -1,0 +1,25 @@
+#!/bin/sh
+# Secure GPU Stack login message, with the latest daily check.
+version=$(sed -n 's/^version=//p' /opt/sgs/manifest.txt 2>/dev/null)
+cat <<EOT
+
+ Secure GPU Stack ${version:-}
+   sgs-check          see this machine's security status
+   sgs-jupyter        JupyterLab URL and the SSH tunnel to reach it
+   sgs-venv ~/env     your own Python environment on top of the stack
+EOT
+# Shown to every user who logs in, and WARN lines can quote file names users
+# control: printable ASCII only, so nothing can send escape codes to another
+# user's terminal.
+last=/var/lib/sgs/last-check
+clean() { LC_ALL=C tr -cd '\040-\176\n'; }
+if [ -r "$last" ]; then
+  when=$(date -r "$last" '+%Y-%m-%d %H:%M')
+  result=$(sed -n 's/^== Result: //p' "$last" | tail -1 | clean)
+  echo
+  printf ' Last daily check (%s): %s\n' "$when" "${result:-no result, see sudo journalctl -u sgs-check}"
+  grep -E '^ *\[(WARN|FAIL)\]' "$last" | head -5 | clean | cut -c1-110 | sed 's/^ */   /'
+  [ "$(grep -cE '^ *\[(WARN|FAIL)\]' "$last")" -le 5 ] || echo "   ... and more: sudo sgs-check"
+  [ -n "$(find "$last" -mmin +4320 2>/dev/null)" ] && echo "   (more than 3 days old: is sgs-check.timer running?)"
+fi
+echo

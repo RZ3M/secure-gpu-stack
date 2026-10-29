@@ -1,0 +1,74 @@
+#cloud-config
+# Secure GPU Stack on Lambda Cloud.
+#
+# Launch Lambda's plain "Ubuntu Server 24.04" image through the Lambda Cloud
+# API and pass this file as user data. On first boot it downloads a release,
+# checks its SHA-256 before running anything, installs the stack and reboots to
+# load the NVIDIA driver. The install log is /var/log/sgs-install.log.
+#
+# Fill in SGS_URL and SGS_SHA256 from a published release
+# (scripts/release.sh prints both). Take the SHA-256 from somewhere other than
+# the download host, such as the release's git tag: a hash fetched from the same
+# place as the tarball only catches corruption, not tampering.
+
+write_files:
+  - path: /root/sgs-release.env
+    permissions: "0600"
+    content: |
+      SGS_URL=https://REPLACE-ME/secure-gpu-stack-0.1.0.tar.gz
+      SGS_SHA256=REPLACE-ME
+      # Optional, for a signed release: the release's allowed_signers line
+      # ("release@secure-gpu-stack ssh-ed25519 AAAA..."), taken from the git
+      # repository, not the download host. Then SHA256SUMS and SHA256SUMS.sig
+      # are fetched next to SGS_URL, the signature is checked, and the hash
+      # comes from there; SGS_SHA256 can stay REPLACE-ME.
+      SGS_ALLOWED_SIGNER=
+
+runcmd:
+  - - bash
+    - -c
+    - |
+      set -euo pipefail
+      . /root/sgs-release.env
+      work="$(mktemp -d)"
+      fetch() { curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$1" "$2"; }
+      fetch "$work/sgs.tar.gz" "$SGS_URL"
+      if [ -n "${SGS_ALLOWED_SIGNER:-}" ]; then
+        # Exactly one signer, for exactly this principal: a wildcard or an
+        # extra pasted line would let some other key's signature count.
+        case "$SGS_ALLOWED_SIGNER" in
+          *$'\n'*) echo "SGS_ALLOWED_SIGNER must be a single line" >&2; exit 1 ;;
+          "release@secure-gpu-stack ssh-ed25519 "*) ;;
+          *) echo "SGS_ALLOWED_SIGNER must start with 'release@secure-gpu-stack ssh-ed25519 '" >&2; exit 1 ;;
+        esac
+        base="${SGS_URL%/*}"
+        fetch "$work/SHA256SUMS" "$base/SHA256SUMS"
+        fetch "$work/SHA256SUMS.sig" "$base/SHA256SUMS.sig"
+        printf '%s\n' "$SGS_ALLOWED_SIGNER" > "$work/allowed_signers"
+        # Explicit exits: these must stop the install even where set -e wouldn't.
+        ssh-keygen -Y verify -f "$work/allowed_signers" -I release@secure-gpu-stack \
+          -n secure-gpu-stack-release -s "$work/SHA256SUMS.sig" < "$work/SHA256SUMS" \
+          || { echo "Release signature check failed; not installing" >&2; exit 1; }
+        # The file name without any ?query or #fragment, passed through the
+        # environment (awk -v would process backslashes); "*name" is binary mode.
+        f="${SGS_URL##*/}"; f="${f%%[?#]*}"
+        signed="$(F="$f" awk '$2 == ENVIRON["F"] || $2 == "*" ENVIRON["F"] { print $1 }' "$work/SHA256SUMS")"
+        [ -n "$signed" ] || { echo "SHA256SUMS has no entry for $f" >&2; exit 1; }
+        # A hash pinned in the user data still has to match: otherwise the
+        # download host could serve an older, validly signed release.
+        if [ -n "$SGS_SHA256" ] && [ "$SGS_SHA256" != REPLACE-ME ] && [ "$SGS_SHA256" != "$signed" ]; then
+          echo "The signed SHA256SUMS doesn't match the pinned SGS_SHA256; not installing" >&2; exit 1
+        fi
+        SGS_SHA256="$signed"
+      fi
+      echo "$SGS_SHA256  $work/sgs.tar.gz" | sha256sum -c - \
+        || { echo "Release checksum check failed; not installing" >&2; exit 1; }
+      tar --no-same-owner -xzf "$work/sgs.tar.gz" -C "$work"
+      "$work"/secure-gpu-stack-*/install.sh --user ubuntu > /var/log/sgs-install.log 2>&1
+      # This run's success, in /run so it can't be left over from an earlier boot.
+      touch /run/sgs-install-ok
+
+# Reboot only if this install finished, so the new driver loads.
+power_state:
+  mode: reboot
+  condition: test -f /run/sgs-install-ok

@@ -1,0 +1,6 @@
+# Security tools, kept in their own environment (/opt/sgs/tools) so their
+# dependencies can't change the ML stack's versions.
+
+pip==26.2.2
+pip-audit==2.10.1    # checks installed Python packages against known vulnerabilities
+modelscan==0.8.8     # scans model files (pickle, PyTorch, Keras, ...) for code that runs on load

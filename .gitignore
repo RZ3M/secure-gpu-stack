@@ -13,3 +13,7 @@ id_*
 # Local tool settings
 .claude/settings.local.json
 .DS_Store
+
+# Build output and noisy test-run logs
+dist/
+tests/results/*.log

@@ -1,0 +1,1431 @@
+#!/usr/bin/env bash
+# sgs-check: audit a GPU machine's security. Works on any Ubuntu machine, with
+# Secure GPU Stack, Lambda Stack or neither, so the two can be compared.
+#
+#   sudo sgs-check [--quick] [--gpu-test] [--accept-changes]
+#     --quick           skip the slow checks: the Python vulnerability audit
+#                       (needs network access) and the file integrity check
+#     --gpu-test        also run a short job on the GPU with PyTorch, JAX and TensorFlow
+#     --accept-changes  record the startup files it watches (cron jobs, shell
+#                       startup files, services, SSH authorized keys) as
+#                       they are now, after you've checked a change it reported
+#
+# For install.sh and sgs-egress, which change startup files themselves:
+#     --list-startup-files            print them, as a record would hold them
+#     --accept-changes-since FILE     accept only what changed since FILE (a
+#                                     list printed earlier), plus places this
+#                                     version watches that the record doesn't
+#
+# It changes nothing except refreshing apt's package lists and keeping its
+# record of those startup files (/var/lib/sgs/startup-files).
+# Exit status: 0 when every check passes, 1 when anything needs attention.
+set -u
+# apt, ufw and friends translate their output; every check below parses English.
+export LC_ALL=C.UTF-8
+
+QUICK=0
+GPU_TEST=0
+ACCEPT=0
+LIST_STARTUP=0
+ACCEPT_SINCE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --quick) QUICK=1 ;;
+    --gpu-test) GPU_TEST=1 ;;
+    --accept-changes) ACCEPT=1 ;;
+    --list-startup-files) LIST_STARTUP=1 ;;
+    --accept-changes-since) ACCEPT_SINCE="${2:?--accept-changes-since needs a file}"; shift ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+[ "$(id -u)" -eq 0 ] || { echo "Run me with sudo: sudo $0"; exit 2; }
+
+# Where code makes itself permanent: cron and at jobs, services, shell and
+# login startup files, programs that run at every login or SSH session,
+# libraries preloaded into every program, Python and IPython startup hooks,
+# Jupyter's configuration, and SSH authorized keys (a new key lets someone
+# back in). System-wide places are root's to change, but a container with the
+# host's files mounted, or a package installed with sudo, can write them too.
+# The per-account ones are fingerprinted for root and every regular account.
+# A trailing / means everything under that directory.
+STARTUP_SYSTEM="/etc/crontab /etc/cron.d/ /etc/cron.hourly/ /etc/cron.daily/ /etc/cron.weekly/
+  /etc/cron.monthly/ /etc/cron.yearly/ /var/spool/cron/crontabs/ /var/spool/cron/atjobs/
+  /var/lib/systemd/linger/ /etc/systemd/system/ /etc/systemd/user/ /etc/systemd/system-generators/
+  /etc/systemd/user-generators/ /etc/init.d/ /etc/rc.local /etc/sudoers /etc/sudoers.d/
+  /etc/ld.so.preload /etc/ld.so.conf /etc/ld.so.conf.d/ /etc/profile /etc/profile.d/
+  /etc/bash.bashrc /etc/environment /etc/zsh/ /etc/update-motd.d/ /etc/pam.d/ /etc/ssh/sshd_config
+  /etc/ssh/sshd_config.d/ /etc/apt/apt.conf.d/ /etc/udev/rules.d/ /etc/modprobe.d/ /etc/modules
+  /etc/modules-load.d/ /etc/xdg/autostart/ /etc/python3*/sitecustomize.py
+  /usr/lib/python3/dist-packages/*.pth /usr/local/lib/python3*/dist-packages/*.pth
+  /usr/local/lib/python3*/dist-packages/sitecustomize.py"
+# ~/.ssh/rc runs at every SSH login; Python runs .pth files and
+# site/usercustomize from the user's site-packages at every start, IPython its
+# startup scripts in every notebook kernel, Jupyter its .py configuration at
+# every server start; ~/.gitconfig can make git run any program
+# (core.fsmonitor, hooksPath); ~/.local/bin comes first on PATH (Ubuntu's
+# ~/.profile), so a "sudo" there would run whenever you type sudo.
+STARTUP_HOME=".ssh/authorized_keys .ssh/authorized_keys2 .ssh/rc .ssh/environment .ssh/config
+  .bashrc .bash_aliases .profile .bash_profile .bash_login .bash_logout .zshenv .zshrc .zprofile
+  .zlogin .config/fish/config.fish .gitconfig .config/git/config .pam_environment
+  .local/lib/python3*/site-packages/*.pth .local/lib/python3*/site-packages/sitecustomize.py
+  .local/lib/python3*/site-packages/usercustomize.py .ipython/profile_default/startup/
+  .jupyter/*.py .jupyter/*.json .local/share/jupyter/kernels/ .config/systemd/user/
+  .local/share/systemd/user/ .config/autostart/ .config/environment.d/ .local/bin/"
+STARTUP_RECORD=/var/lib/sgs/startup-files
+# A fingerprint line: hash, the watched place it's under, path. A symlink
+# counts as its target plus that target's contents, so swapping a file for a
+# link shows as a change. A newline in a name would split the line: it's
+# shown as "?".
+fingerprint() {
+  local f="$1" place="$2" h
+  if [ -L "$f" ]; then
+    h=$( { readlink "$f"; [ -f "$f" ] && cat "$f"; } 2>/dev/null | sha256sum | cut -c1-16)
+  elif [ -f "$f" ]; then
+    h=$(sha256sum < "$f" | cut -c1-16)
+  else
+    return 0
+  fi
+  printf '%s %s %s\n' "$h" "$place" "${f//$'\n'/?}"
+}
+# snapd's mount units (and their links), rewritten at every snap refresh:
+# skipped only when they mount a snap's squashfs under /snap and nothing else.
+snapd_mount() {
+  local t
+  case "${1##*/}" in snap-*.mount) ;; *) return 1 ;; esac
+  t=$(readlink -f "$1")
+  case "$t" in /etc/systemd/system/snap-*.mount) ;; *) return 1 ;; esac
+  grep -qx 'What=/var/lib/snapd/snaps/[^/]*\.snap' "$t" && grep -qx 'Where=/snap/[^ ]*' "$t" \
+    && grep -qx 'Type=squashfs' "$t" && ! grep -qiE '^(Exec|Options=.*(helper|exec))' "$t"
+}
+# Every file in a watched place: $1 is the place (a glob, or a directory with
+# a trailing /), $2 how it's named in the record.
+startup_place() {
+  local f
+  case "$1" in
+    */)
+      [ -d "$1" ] || return 0
+      while IFS= read -r -d '' f; do
+        case "$1" in /etc/systemd/system/) snapd_mount "$f" && continue ;; esac
+        fingerprint "$f" "$2"
+      done < <(find "$1" \( -type f -o -type l \) -print0 2>/dev/null) ;;
+    *)
+      for f in $1; do fingerprint "$f" "$2"; done ;;
+  esac
+}
+# The record: one "place" line per watched place (so a place with no files yet
+# still counts as watched), then the files' fingerprints, sorted.
+startup_files() {
+  local w h
+  {
+    set -f
+    for w in $STARTUP_SYSTEM; do echo "place $w"; done
+    for w in $STARTUP_HOME; do echo "place ~/$w"; done
+    for w in $STARTUP_SYSTEM; do set +f; startup_place "$w" "$w"; set -f; done
+    getent passwd | awk -F: '($3 == 0 || $3 >= 1000) && $6 ~ /^\// && $6 != "/" { print $6 }' | sort -u | while IFS= read -r h; do
+      [ -d "$h" ] || continue
+      for w in $STARTUP_HOME; do set +f; startup_place "$h/$w" "~/$w"; set -f; done
+    done
+    set +f
+  } | sort
+}
+# Compare the record with now: "C path" new or changed, "G path" gone, and
+# "P place" for a place this version watches that the record didn't.
+startup_compare() {
+  awk '
+    FNR == 1 { f++ }
+    /^place / { w = substr($0, 7); if (f == 1) old[w] = 1; else cur[w] = 1; next }
+    { p = $0; sub(/^[^ ]+ [^ ]+ /, "", p) }
+    f == 1 { rec[p] = $0; recw[p] = $2; next }
+    { now[p] = $0; noww[p] = $2 }
+    END {
+      for (w in cur) if (!(w in old)) { print "P " w; fresh[w] = 1 }
+      for (p in now) if (!(noww[p] in fresh) && rec[p] != now[p]) print "C " p
+      for (p in rec) if (!(p in now) && (recw[p] in cur)) print "G " p
+    }' "$1" "$2" | sort
+}
+# The record after a run of install.sh or sgs-egress: what it changed (between
+# the list in $1 and now) and places the record didn't watch are accepted;
+# anything else stays as last accepted, so a change waiting for review stays
+# reported.
+startup_accept_since() {
+  awk '
+    FNR == 1 { f++ }
+    /^place / { w = substr($0, 7); if (f == 2) old[w] = 1; if (f == 3) cur[w] = 1; next }
+    { p = $0; sub(/^[^ ]+ [^ ]+ /, "", p) }
+    f == 1 { pre[p] = $0; next }
+    f == 2 { rec[p] = $0; recw[p] = $2; next }
+    { now[p] = $0; noww[p] = $2 }
+    END {
+      for (w in cur) print "place " w
+      for (p in now) {
+        before = (p in pre) ? pre[p] : ""
+        if (before != now[p] || !(noww[p] in old)) print now[p]
+        else if (p in rec) print rec[p]
+      }
+      for (p in rec) if (!(p in now) && !(p in pre) && (recw[p] in cur)) print rec[p]
+    }' "$1" "$STARTUP_RECORD" "$2" | sort
+}
+if [ "$LIST_STARTUP" = 1 ]; then
+  startup_files
+  exit 0
+fi
+if [ -n "$ACCEPT_SINCE" ]; then
+  [ -r "$ACCEPT_SINCE" ] || { echo "Can't read $ACCEPT_SINCE" >&2; exit 2; }
+  [ -s "$STARTUP_RECORD" ] || ACCEPT=1
+fi
+if [ "$ACCEPT" = 1 ] || [ -n "$ACCEPT_SINCE" ]; then
+  install -d -m 0700 "$(dirname "$STARTUP_RECORD")"
+  now_list=$(mktemp); trap 'rm -f "$now_list"' EXIT
+  startup_files > "$now_list"
+  if [ "$ACCEPT" = 1 ]; then
+    ( umask 077; cat "$now_list" > "$STARTUP_RECORD.new" )
+  else
+    ( umask 077; startup_accept_since "$ACCEPT_SINCE" "$now_list" > "$STARTUP_RECORD.new" )
+  fi
+  mv "$STARTUP_RECORD.new" "$STARTUP_RECORD"
+  echo "Recorded $(grep -vc '^place ' "$STARTUP_RECORD") startup files ($STARTUP_RECORD)."
+  exit 0
+fi
+
+# One run at a time: the daily run (sgs-check.timer) and a manual one would
+# otherwise fight over apt's lock and report each other as failures.
+exec 9>/run/sgs-check.lock
+if ! flock -n 9; then
+  echo "Waiting for another sgs-check run to finish..." >&2
+  flock -w 900 9 || { echo "Another sgs-check has been running for 15 minutes; try again later" >&2; exit 2; }
+fi
+
+# NVIDIA driver branches and their end of life, from NVIDIA's "Supported Drivers
+# and CUDA Toolkit Versions" page (checked 2026-10-28). Branches not listed are
+# end of life.
+DRIVER_BRANCH_EOL="535:2026-06 580:2028-06 595:2027-03 610:2026-08"
+# Reported fixed version for CVE-2026-24260 (NVIDIA bulletin 5850).
+MIN_CONTAINER_TOOLKIT="1.19.1"
+
+passes=0; warns=0; skips=0
+ok()      { echo "  [PASS] $1"; passes=$((passes + 1)); }
+bad()     { echo "  [WARN] $1"; warns=$((warns + 1)); }
+skip()    { echo "  [SKIP] $1"; skips=$((skips + 1)); }
+note()    { echo "         $1"; }
+section() { echo; echo "== $1"; }
+# Print a helper's "PASS|text" / "WARN|text" / "NOTE|text" lines as results.
+# Pass the output as an argument (not through a pipe, which would run this in
+# a subshell and lose the counts). Empty output means the helper failed.
+report() {
+  if [ -z "$1" ]; then bad "$2 didn't run (internal error)"; return; fi
+  while IFS='|' read -r kind text; do
+    case "$kind" in
+      PASS) ok "$text" ;; WARN) bad "$text" ;; SKIP) skip "$text" ;; *) note "$text" ;;
+    esac
+  done <<< "$1"
+}
+version_lt() { dpkg --compare-versions "$1" lt "$2"; }
+
+section "Machine"
+. /etc/os-release
+echo "  $PRETTY_NAME, kernel $(uname -r), $(dpkg --print-architecture)"
+gpus=$(lspci -mn -d 10de: 2>/dev/null | awk '$2 ~ /^"03/' | wc -l | tr -d ' ')
+echo "  NVIDIA GPUs: $gpus"
+if [ -f /opt/sgs/manifest.txt ]; then
+  echo "  Stack: Secure GPU Stack $(sed -n 's/^version=//p' /opt/sgs/manifest.txt)"
+elif dpkg-query -W -f='${Status}' lambda-repository 2>/dev/null | grep -q installed; then
+  echo "  Stack: Lambda Stack"
+else
+  echo "  Stack: none detected"
+fi
+
+section "Package sources"
+sources_out=$(/usr/bin/python3 -I - <<'EOF'
+import glob, re
+from urllib.parse import urlparse
+
+entries = []  # (file, uri, signed_by, unsafe options)
+# Options that make apt accept packages without a valid signature.
+UNSAFE = ("trusted", "allow-insecure", "allow-weak", "allow-downgrade-to-insecure")
+TRUE = "yes|true|1|on|with|enable"   # every spelling apt reads as true
+
+def one_line(path):
+    for line in open(path, errors="replace"):
+        m = re.match(r"\s*deb(?:-src)?\s+(\[[^\]]*\])?\s*(\S+)", line)
+        if m:
+            opts = m.group(1) or ""
+            sb = re.search(r"signed-by=([^\s\]]+)", opts, re.I)
+            unsafe = [o for o in UNSAFE if re.search(rf"\b{o}=({TRUE})\b", opts, re.I)]
+            entries.append((path, m.group(2), sb.group(1) if sb else "", unsafe))
+
+def deb822(path):
+    for para in re.split(r"\n\s*\n", open(path, errors="replace").read()):
+        fields, last = {}, None
+        for line in para.splitlines():
+            if line.startswith("#"):
+                continue
+            if line[:1].isspace() and last:
+                # A continuation line: more URIs, say, or an inline key.
+                if last == "signed-by":
+                    fields[last] = fields[last] or "(inline key)"
+                else:
+                    fields[last] = (fields[last] + " " + line.strip()).strip()
+            elif ":" in line:
+                last, value = (s.strip() for s in line.split(":", 1))
+                last = last.lower()
+                fields[last] = value
+        if fields.get("enabled", "yes").lower() == "no":
+            continue
+        unsafe = [o for o in UNSAFE if re.fullmatch(TRUE, fields.get(o, "").strip(), re.I)]
+        for uri in fields.get("uris", "").split():
+            entries.append((path, uri, fields.get("signed-by", ""), unsafe))
+
+for p in glob.glob("/etc/apt/sources.list") + glob.glob("/etc/apt/sources.list.d/*.list"):
+    one_line(p)
+for p in glob.glob("/etc/apt/sources.list.d/*.sources"):
+    deb822(p)
+
+def ubuntu(uri):
+    # Exactly ubuntu.com or a subdomain: "notubuntu.com" isn't Ubuntu.
+    host = urlparse(uri).hostname or ""
+    return host == "ubuntu.com" or host.endswith(".ubuntu.com")
+
+for path, uri, _, unsafe in entries:
+    if unsafe:
+        print(f"WARN|{urlparse(uri).hostname}: {', '.join(unsafe)} set in {path}: apt installs its packages without checking signatures")
+third_party = [e for e in entries if not ubuntu(e[1])]
+if not third_party:
+    print("NOTE|Only Ubuntu's own package sources are configured")
+seen = set()
+for path, uri, signed_by, unsafe in third_party:
+    if uri in seen:
+        continue
+    seen.add(uri)
+    host = urlparse(uri).hostname
+    problems = []
+    if not uri.startswith("https://"):
+        problems.append("plain HTTP")
+    if not signed_by:
+        problems.append("key not limited to this source")
+    if problems:
+        print(f"WARN|{host}: {', '.join(problems)}")
+    elif not unsafe:
+        print(f"PASS|{host}: HTTPS, key limited to this source")
+EOF
+)
+report "$sources_out" "Package source check"
+
+# The keys the installer pinned by fingerprint (the same pins as install.sh) must
+# still be exactly those keys, and only root may change any repository key: a
+# swapped key file means apt trusts a different signer for that source.
+gnupg_tmp=$(mktemp -d)
+for pinned in /etc/apt/keyrings/sgs-nvidia-cuda.gpg:EB693B3035CD5710E231E123A4B469963BF863CC \
+              /etc/apt/keyrings/sgs-docker.gpg:9DC858229FC7DD38854AE2D88D81803C0EBFCD88; do
+  kf="${pinned%%:*}"; want="${pinned##*:}"
+  [ -f "$kf" ] || continue
+  got=$(GNUPGHOME="$gnupg_tmp" gpg --show-keys --with-colons "$kf" 2>/dev/null | awk -F: '/^fpr/ { print $10; exit }')
+  [ "$got" = "$want" ] && ok "$(basename "$kf") is still the key pinned at install ($want)" \
+                       || bad "$(basename "$kf") is not the key pinned at install (fingerprint ${got:-unreadable})"
+done
+rm -rf "$gnupg_tmp"
+loose_keys=$(find /etc/apt/keyrings /usr/share/keyrings /etc/apt/trusted.gpg.d -type f \( ! -user root -o -perm /022 \) 2>/dev/null || true)
+[ -z "$loose_keys" ] || bad "Repository keys someone other than root can change: $(echo $loose_keys)"
+# Only Ubuntu's own two keyrings, by exact name, with their contents verified
+# against the ubuntu-keyring package (a lookalike "ubuntu-keyring-x.gpg" isn't).
+global_keys=$(find /etc/apt/trusted.gpg.d -maxdepth 1 \( -type f -o -type l \) \
+  ! -name ubuntu-keyring-2012-cdimage.gpg ! -name ubuntu-keyring-2018-archive.gpg 2>/dev/null)
+[ -s /etc/apt/trusted.gpg ] && global_keys="$global_keys /etc/apt/trusted.gpg"
+if [ -z "$(echo $global_keys)" ]; then
+  ok "No third-party key is trusted for every repository"
+else
+  for k in $global_keys; do bad "$(basename "$k") is trusted for every repository, not just its own"; done
+fi
+changed_keys=$(dpkg --verify ubuntu-keyring 2>/dev/null | awk '{ print $NF }' | grep '^/etc/apt/trusted.gpg.d/' || true)
+[ -z "$changed_keys" ] || bad "Ubuntu's own archive keys were changed: $(echo $changed_keys)"
+
+# Priority 1000 and up allows downgrades. A low priority on Ubuntu's own
+# suites quietly holds back their updates, and `apt list --upgradable` then
+# shows nothing, so both count.
+pin_report=$(/usr/bin/python3 -I - <<'EOF'
+import glob, re
+for path in glob.glob("/etc/apt/preferences") + glob.glob("/etc/apt/preferences.d/*"):
+    try:
+        text = open(path, errors="replace").read()
+    except OSError:
+        continue
+    for para in re.split(r"\n\s*\n", text):
+        pin = re.search(r"^\s*Pin:\s*(.+)$", para, re.M | re.I)
+        prio = re.search(r"^\s*Pin-Priority:\s*(-?\d+)", para, re.M | re.I)
+        if not (pin and prio):
+            continue
+        n, target = int(prio.group(1)), pin.group(1)
+        pkgs = re.search(r"^\s*Package:\s*(.+)$", para, re.M | re.I)
+        # Canonical's own sources include Ubuntu Pro's ESM archives.
+        ubuntu = re.search(r"\bo=Ubuntu(ESM\w*)?\b|\bnoble(-security|-updates)?\b|ubuntu\.com", target)
+        if n >= 1000:
+            print(f"WARN|Pin at {n} overrides other sources and allows downgrades: {path}")
+        elif n < 500 and ubuntu:
+            print(f"WARN|Pin at {n} holds back Ubuntu's own updates ({target.strip()}): {path}")
+        # Above Ubuntu's 500, another source wins even with an older version.
+        # Pinning a few named packages to their own repository (nodejs to
+        # NodeSource) is a deliberate choice; doing it for every package is
+        # what can quietly replace Ubuntu's security updates.
+        elif n > 500 and not ubuntu and pkgs and pkgs.group(1).strip() == "*":
+            print(f"WARN|Pin at {n} lets another source outrank Ubuntu's updates ({target.strip()}): {path}")
+print("DONE")
+EOF
+)
+# Without the DONE line the parser died: that's not a pass.
+case "$pin_report" in
+  *DONE) pin_report="${pin_report%DONE}"
+         if [ -z "$(echo $pin_report)" ]; then ok "No apt pin can override Ubuntu's updates or force downgrades"
+         else report "$pin_report" "Pin check"; fi ;;
+  *) bad "Couldn't read the apt pins (internal error)" ;;
+esac
+# If apt can't refresh (a conflicting source entry, say), unattended upgrades
+# fail too, and every update check below would pass on stale lists. Another
+# apt run (Ubuntu's daily jobs) holding the lock isn't that: wait for it, up
+# to 10 minutes. One that holds it longer is reported.
+for _ in $(seq 120); do
+  fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1 || break
+  sleep 5
+done
+if apt_err=$(apt-get update -qq 2>&1 >/dev/null) && ! echo "$apt_err" | grep -q '^E:'; then
+  APT_OK=1
+  ok "apt can refresh its package lists"
+else
+  APT_OK=0
+  bad "apt can't refresh its package lists, so automatic updates are failing: $(echo "$apt_err" | grep -m1 '^E:' | cut -c1-160)"
+fi
+
+section "NVIDIA driver"
+drv_pkgs=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' \
+  'nvidia-utils-*' 'nvidia-headless-*' 'nvidia-driver-*' 2>/dev/null | awk '$1 == "ii" { print $2, $3 }')
+if [ -z "$drv_pkgs" ]; then
+  if [ "$gpus" -gt 0 ] && grep -qx 'driver=skipped' /opt/sgs/manifest.txt 2>/dev/null; then
+    skip "No NVIDIA driver: the stack was installed with --no-driver"
+  elif [ "$gpus" -gt 0 ]; then bad "GPUs present but no NVIDIA driver installed"
+  else skip "No NVIDIA driver or GPU on this machine"; fi
+else
+  # Every installed branch: leftovers from an older one can sit next to the
+  # current driver when removing them would take other packages along.
+  for branch in $(echo "$drv_pkgs" | grep -oE -- '-[0-9]{3}(-|$| )' | tr -dc '0-9\n' | sort -u); do
+    eol=$(echo "$DRIVER_BRANCH_EOL" | tr ' ' '\n' | awk -F: -v b="$branch" '$1 == b { print $2 }')
+    if [ -z "$eol" ]; then
+      bad "Driver branch R$branch is end of life: it no longer gets security fixes"
+    elif [[ "$(date +%Y-%m)" > "$eol" ]]; then
+      bad "Driver branch R$branch reached end of life in $eol"
+    else
+      ok "Driver branch R$branch is supported by NVIDIA until $eol"
+    fi
+  done
+  # Is Ubuntu offering a newer build that apt will or won't install?
+  pending=""; blocked=""
+  foreign=""
+  while read -r pkg ver; do
+    ubuntu_vers=$(apt-cache madison "$pkg" 2>/dev/null | grep -E '\|[[:space:]]*https?://([a-z0-9.-]+\.)?ubuntu\.com/' | awk -F'|' '{ gsub(/ /, "", $2); print $2 }')
+    # The installed build must be one Ubuntu offers: NVIDIA's repository
+    # publishes newer builds under the same names, outside Ubuntu's security process.
+    [ -z "$ubuntu_vers" ] || echo "$ubuntu_vers" | grep -qxF "$ver" || foreign="$foreign $pkg=$ver"
+    newest=$(echo "$ubuntu_vers" | sort -V | tail -1)
+    [ -n "$newest" ] && version_lt "$ver" "$newest" || continue
+    cand=$(apt-cache policy "$pkg" | awk '/Candidate:/ { print $2 }')
+    if [ "$cand" = "$newest" ]; then pending="$pkg $ver -> $newest"; else blocked="$pkg $ver (Ubuntu has $newest, apt picks $cand)"; fi
+  done <<< "$drv_pkgs"
+  [ -z "$foreign" ] || bad "The installed driver isn't Ubuntu's build:$foreign"
+  if [ -n "$blocked" ]; then bad "Ubuntu's newer driver is blocked by another source: $blocked"
+  elif [ -n "$pending" ]; then bad "Driver update waiting: $pending (sudo apt upgrade, then reboot)"
+  elif [ "$APT_OK" = 0 ]; then skip "Can't tell whether the driver is current (apt's lists are stale)"
+  else ok "Driver is the newest build Ubuntu offers"
+  fi
+  if command -v nvidia-smi >/dev/null && nvidia-smi 2>&1 | grep -q "version mismatch"; then
+    bad "Driver was updated but the old one is still loaded: reboot"
+  fi
+fi
+if [ "$gpus" -gt 0 ] && [ -n "$drv_pkgs" ] && [ ! -r /proc/driver/nvidia/params ]; then
+  bad "The NVIDIA driver is installed but not loaded (reboot?): its signature and profiling settings can't be checked"
+fi
+if [ -r /proc/driver/nvidia/params ]; then
+  # Performance counters can leak what other GPU processes do (CVE-2018-6260).
+  if grep -q 'RmProfilingAdminOnly: 1' /proc/driver/nvidia/params; then
+    ok "GPU performance counters are admin-only"
+  else
+    bad "Any user can read GPU performance counters (side channel, CVE-2018-6260)"
+  fi
+  # Ubuntu's prebuilt modules are signed by Canonical. An unsigned module (a
+  # DKMS build without a key, or something worse) sets taint bit 13.
+  signer=$(modinfo -F signer nvidia 2>/dev/null)
+  if [ $(( $(cat /proc/sys/kernel/tainted) & 8192 )) -ne 0 ]; then
+    bad "An unsigned kernel module is loaded"
+  elif [ -n "$signer" ]; then
+    ok "NVIDIA kernel module is signed ($signer)"
+  else
+    bad "NVIDIA kernel module isn't signed"
+  fi
+  command -v mokutil >/dev/null && note "$(mokutil --sb-state 2>/dev/null | head -1)"
+  # World-accessible device files let every local user and service account
+  # reach the NVIDIA kernel driver. The stack sets the ones CUDA uses to
+  # root:video 0660 and locks them with a read-only bind mount, since root's
+  # GPU use recreates them (from the DeviceFile settings, or 0666 for UVM).
+  # MIG capability files under nvidia-caps are read-only for everyone by
+  # NVIDIA's design (monitoring), so only writable ones count there.
+  vgid=$(getent group video | cut -d: -f3)
+  open_devs=$( { find /dev -maxdepth 1 -name 'nvidia*' -type c -perm /006
+                 find /dev/nvidia-caps* -mindepth 1 -type c -perm /002; } 2>/dev/null | tr '\n' ' ')
+  wrong_devs="" unlocked_devs=""
+  for dev in /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia[0-9]*; do
+    [ -c "$dev" ] || continue
+    if [ "$(stat -c %u:%g:%a "$dev")" != "0:$vgid:660" ]; then
+      wrong_devs="$wrong_devs $dev"
+    # Locked means chmod fails. Tested rather than read from mountinfo, where
+    # stacked copies of a mount hide which one applies; on a 0660 file,
+    # chmod 0660 changes nothing either way.
+    elif ! chmod 0660 "$dev" 2>&1 | grep -q 'Read-only file system'; then
+      unlocked_devs="$unlocked_devs $dev"
+    fi
+  done
+  dmode=$(awk '$1 == "DeviceFileMode:" { print $2 }' /proc/driver/nvidia/params)
+  dgid=$(awk '$1 == "DeviceFileGID:" { print $2 }' /proc/driver/nvidia/params)
+  if [ -n "$open_devs" ]; then
+    bad "GPU device files are open to every local user: $open_devs(the stack manages the ones CUDA uses: /usr/local/sbin/sgs-gpu-devices)"
+  elif [ -n "$wrong_devs" ]; then
+    bad "GPU device files aren't root:video 0660:$wrong_devs (sudo /usr/local/sbin/sgs-gpu-devices)"
+  elif ! [ "$dmode" -ge 0 ] 2>/dev/null || [ $(( dmode & 6 )) -ne 0 ] || [ "$dgid" != "$vgid" ]; then
+    bad "The driver recreates the GPU device files for other users whenever root uses the GPU (NVreg_DeviceFile settings; reboot to load /etc/modprobe.d/sgs-nvidia.conf)"
+  elif [ -n "$unlocked_devs" ]; then
+    bad "The next root CUDA program can reopen these to every local user (not locked):$unlocked_devs (sudo /usr/local/sbin/sgs-gpu-devices)"
+  elif [ -e /sbin/ub-device-create ] && [ "$(dpkg-divert --truename /sbin/ub-device-create)" = /sbin/ub-device-create ]; then
+    bad "Ubuntu's ub-device-create creates the GPU device files open to every local user when the driver loads, until they're locked (not diverted)"
+  else
+    ok "GPU device files are for the video group only, and locked ($(getent group video | cut -d: -f4 | tr ',' ' '))"
+  fi
+  # Service accounts in video can open the GPU like any member.
+  sys_video=""
+  for u in $(getent group video | cut -d: -f4 | tr ',' ' '); do
+    uid=$(id -u "$u" 2>/dev/null) && [ "$uid" -lt 1000 ] && sys_video="$sys_video $u"
+  done
+  [ -z "$sys_video" ] || bad "Service accounts in the video group can open the GPU:$sys_video (sudo gpasswd -d NAME video)"
+  # It drops root without its account's groups, so it needs the stack's drop-in.
+  if systemctl is-failed --quiet nvidia-persistenced.service; then
+    bad "nvidia-persistenced is failing (journalctl -u nvidia-persistenced)"
+  fi
+fi
+
+section "Containers"
+if command -v nvidia-ctk >/dev/null; then
+  nct=$(nvidia-ctk --version 2>/dev/null | awk 'NR == 1 { print $NF }')
+  if [ -z "$nct" ]; then
+    bad "NVIDIA Container Toolkit is installed but nvidia-ctk doesn't run: can't tell its version"
+  elif version_lt "$nct" "$MIN_CONTAINER_TOOLKIT"; then
+    bad "NVIDIA Container Toolkit $nct is older than $MIN_CONTAINER_TOOLKIT (CVE-2026-24260)"
+  else
+    ok "NVIDIA Container Toolkit $nct"
+  fi
+else
+  skip "NVIDIA Container Toolkit not installed"
+fi
+if command -v docker >/dev/null; then
+  members=$(getent group docker | cut -d: -f4)
+  [ -z "$members" ] && ok "Nobody is in the root-equivalent docker group" \
+                    || bad "In the docker group (equivalent to root): $members"
+  # The effective settings: with a duplicate key Docker takes the last one, so a
+  # grep that finds the first can be fooled. Python's json reads it the same way.
+  read -r dj_ip dj_bind dj_nnp dj_runtime <<< "$(/usr/bin/python3 -I -c '
+import json, sys
+try:
+    c = json.load(open("/etc/docker/daemon.json"))
+except FileNotFoundError:
+    c = {}
+except ValueError:
+    print("invalid - - -"); sys.exit()
+b = c.get("default-network-opts", {}).get("bridge", {}).get("com.docker.network.bridge.host_binding_ipv4")
+print(c.get("ip") or "-", b or "-", str(c.get("no-new-privileges", False)).lower(), c.get("default-runtime") or "-")' 2>/dev/null)"
+  [ "$dj_ip" = invalid ] && bad "/etc/docker/daemon.json isn't valid JSON, so Docker ignores the stack's settings"
+  # "ip" only covers Docker's default network. Networks created later (docker
+  # compose makes one per project) need the default-network-opts binding too.
+  if [ "$dj_ip" != 127.0.0.1 ]; then
+    bad "Published container ports are open to the network and bypass the firewall"
+  elif [ "$dj_bind" != 127.0.0.1 ]; then
+    bad "Ports published on new Docker networks (docker compose makes its own) are open to the network and bypass the firewall"
+  else
+    ok "Published container ports stay on localhost unless asked otherwise, on every Docker network"
+  fi
+  # Networks created before that setting keep publishing on every interface.
+  open_nets=$(timeout 20 docker network ls --filter driver=bridge --format '{{.Name}}' 2>/dev/null | grep -vx bridge \
+    | while read -r net; do
+        [ "$(timeout 10 docker network inspect -f '{{index .Options "com.docker.network.bridge.host_binding_ipv4"}}' "$net" 2>/dev/null)" = 127.0.0.1 ] || echo "$net"
+      done)
+  [ -z "$open_nets" ] || bad "Docker networks that publish ports on every interface (recreate them): $(echo $open_nets)"
+  # Ask Docker which ports are published to every interface: with
+  # "userland-proxy": false there's no listening socket for ss to see.
+  public=$(timeout 20 docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null \
+    | grep -E '(0\.0\.0\.0|\[::\]|:::):[0-9]+->' | awk '{ print $1 }' | tr '\n' ' ')
+  [ -z "$public" ] || bad "Running containers publish ports to every interface, around the firewall: $public"
+  # Settings that make a container root on this machine in all but name:
+  # --privileged, the Docker socket mounted inside (whoever reaches it runs
+  # any container), the host's PID namespace, capabilities that reach past
+  # the container (SYS_ADMIN, SYS_MODULE, SYS_RAWIO, DAC_READ_SEARCH: the
+  # "Shocker" escape), a system folder of the host mounted in (/, /etc,
+  # /root, /boot, /usr, /var, /run, /home, /proc, /sys), or raw disks and
+  # /dev/mem passed in. (Host networking isn't one: the firewall still filters it, and
+  # multi-node NCCL often needs it. The GPU's own device files aren't either.)
+  # Weaker, but worth knowing: a container running as root on the host's IPC
+  # namespace (--ipc=host, which PyTorch's docs suggest for DataLoaders) gets
+  # the host's /dev/shm, and reads every user's shared memory there (tested);
+  # --shm-size gives a DataLoader the room without that. And containers with
+  # the seccomp filter or AppArmor profile turned off.
+  inspected=$(timeout 20 docker ps -q 2>/dev/null | xargs -r timeout 20 docker inspect -f \
+            '{{.Name}}|{{.HostConfig.Privileged}}|{{.HostConfig.PidMode}}|,{{range .Mounts}}{{.Source}},{{end}}|{{.HostConfig.CapAdd}}|,{{range .HostConfig.Devices}}{{.PathOnHost}},{{end}}|{{.HostConfig.IpcMode}}|{{.Config.User}}|{{.HostConfig.SecurityOpt}}' 2>/dev/null)
+  risky=$(echo "$inspected" | awk -F'|' 'NF { r = ""
+              if ($2 == "true") r = r ", privileged"
+              if ($3 == "host") r = r ", host PIDs"
+              if ($4 ~ /docker\.sock/) r = r ", Docker socket"
+              if ($4 ~ /,\/(etc|root|boot|usr|var|run|home|proc|sys)?\/?,/) r = r ", host files"
+              if ($5 ~ /SYS_ADMIN|SYS_MODULE|SYS_RAWIO|DAC_READ_SEARCH|ALL/) r = r ", capabilities past the container"
+              if ($6 ~ /,\/dev\/(sd|nvme|vd|xvd|hd|mmcblk|dm-|mapper|mem|kmem|port)/) r = r ", host disks or memory"
+              if (r != "") printf "%s (%s) ", substr($1, 2), substr(r, 3) }')
+  weak=$(echo "$inspected" | awk -F'|' 'NF { r = ""
+              if ($7 == "host" && $8 ~ /^(|0|root)(:.*)?$/) r = r ", host IPC as root: it reads every user'"'"'s /dev/shm; --shm-size avoids that"
+              if ($9 ~ /seccomp[=:]unconfined/) r = r ", no seccomp filter"
+              if ($9 ~ /apparmor[=:]unconfined/) r = r ", no AppArmor profile"
+              if ($2 != "true" && r != "") printf "%s (%s) ", substr($1, 2), substr(r, 3) }')
+  [ -z "$risky" ] || bad "Running containers with root over this machine: $risky"
+  [ -z "$weak" ] || bad "Running containers with weakened isolation: $weak"
+  if [ "$dj_nnp" = true ]; then
+    ok "Containers can't gain privileges through setuid programs"
+  else
+    bad "Containers can gain privileges through setuid programs (no-new-privileges is off)"
+  fi
+  # With "nvidia" as the default runtime, any image that sets
+  # NVIDIA_VISIBLE_DEVICES gets the GPU and the toolkit's host-side hooks
+  # without asking (the hook path NVIDIAScape, CVE-2025-23266, abused).
+  if [ "$dj_runtime" = nvidia ]; then
+    bad "Every container gets the NVIDIA runtime by default, not only ones started with --gpus"
+  else
+    ok "Containers get the GPU only when asked (--gpus or --device)"
+  fi
+  # A CDI spec anyone but root can change can add host mounts and root hooks to
+  # every GPU container.
+  cdi_writable=$(find /etc/cdi /var/run/cdi \( -perm /022 -o ! -user root \) 2>/dev/null)
+  [ -z "$cdi_writable" ] || bad "GPU device specs can be changed by non-root users: $(echo $cdi_writable)"
+  # A spec generated before a driver change can name host files that are gone;
+  # every GPU container then fails to start.
+  for spec in /etc/cdi/*.yaml /var/run/cdi/*.yaml; do
+    [ -e "$spec" ] || continue
+    gone=$(grep -oE 'hostPath: /[^ ]+' "$spec" | awk '{ print $2 }' | sort -u | while read -r p; do [ -e "$p" ] || echo "$p"; done)
+    if [ -z "$gone" ]; then
+      ok "GPU device spec matches the installed driver ($spec)"
+    else
+      bad "GPU device spec is stale: $(echo "$gone" | wc -l) files it mounts are gone (sudo systemctl restart nvidia-cdi-refresh)"
+    fi
+  done
+else
+  skip "Docker not installed"
+fi
+
+section "Python ML stack"
+# Python code from the stack (the GPU test) and its tools (pip-audit) runs as the
+# user who called sudo, or nobody, never as root: a .pth file planted in their
+# site-packages would otherwise run as root during the audit.
+run_as="${SUDO_USER:-nobody}"; [ "$run_as" = root ] && run_as=nobody
+if [ -x /opt/sgs/venv/bin/python ]; then
+  PY=/opt/sgs/venv/bin/python; SITE=/opt/sgs/venv/lib/python3.12/site-packages
+  if grep -qiE '^include-system-site-packages[[:space:]]*=[[:space:]]*true' /opt/sgs/venv/pyvenv.cfg 2>/dev/null; then
+    bad "Stack environment also loads the OS's Python packages (include-system-site-packages = true)"
+  else
+    ok "Stack lives in its own environment, separate from the OS's Python"
+  fi
+elif [ -d /usr/lib/python3/dist-packages/torch ] || [ -d /usr/lib/python3/dist-packages/tensorflow ]; then
+  PY=/usr/bin/python3; SITE=/usr/lib/python3/dist-packages
+  note "Stack is mixed into the OS's own Python (/usr/lib/python3/dist-packages)"
+else
+  PY=""; skip "No ML stack found"
+fi
+if [ -n "$PY" ]; then
+  # Versions come from the packages' metadata, read by the OS's Python with
+  # site processing off (-S). Starting the stack's own Python here would run any
+  # .pth file planted in its site-packages, as root, before the checks below.
+  versions=$(/usr/bin/python3 -I -S - "$SITE" <<'EOF' 2>/dev/null
+import importlib.metadata as m, sys
+dists = {(d.metadata["Name"] or "").lower(): d.version for d in m.distributions(path=[sys.argv[1]])}
+print("   ".join(f"{p} {dists[p]}" for p in ("torch", "tensorflow", "keras", "jax", "jupyterlab") if p in dists))
+EOF
+)
+  note "$versions"
+  if [ -f /opt/sgs/manifest.txt ]; then
+    missing=""
+    for want in torch tensorflow keras jax jupyterlab; do
+      case " $versions " in *" $want "*) ;; *) missing="$missing $want" ;; esac
+    done
+    [ -z "$missing" ] && ok "The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)" \
+                      || bad "Frameworks missing from the stack:$missing"
+  fi
+  if [ -n "$(find "$SITE" -maxdepth 0 -perm /022 2>/dev/null)" ] || [ "$(stat -c %u "$SITE")" != 0 ]; then
+    bad "Users can modify the stack's packages ($SITE)"
+  else
+    ok "Stack packages are read-only for users"
+  fi
+  # The login profile puts the first two first on everyone's PATH, root's
+  # included; the tools (pip-audit, modelscan) and TensorFlow's CUDA libraries
+  # are the stack's too.
+  open_bins=""
+  for d in /opt/sgs/venv/bin /usr/local/cuda/bin /opt/sgs/tools /opt/sgs/tools/bin /opt/sgs/tf-cuda12; do
+    [ -d "$d" ] || continue
+    { [ "$(stat -L -c %u "$d")" != 0 ] || [ -n "$(find -L "$d" -maxdepth 1 -perm /022 2>/dev/null)" ]; } && open_bins="$open_bins $d"
+  done
+  [ -z "$open_bins" ] && ok "Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root" \
+                      || bad "Stack folders others can change (some are first on everyone's PATH, root's too):$open_bins"
+  # Ubuntu's own CUDA packages (nvidia-cuda-toolkit) put CUDA 12.0 libraries on
+  # the system path. Frameworks that open libraries by name can load those
+  # instead of the hash-locked wheels: on the krabs test bench TensorFlow loaded
+  # Ubuntu's cuSOLVER and quietly lost the GPU. (cuDNN is left out: the stack
+  # installs it system-wide on purpose, and TensorFlow's hook keeps it apart.)
+  shadow=$(ldconfig -p 2>/dev/null | awk '$NF ~ /^\/(usr\/)?lib\/[a-z0-9_]+-linux-gnu\/lib(cudart|cublas|cublasLt|cufft|curand|cusolver|cusparse|nvJitLink|nvrtc)\.so\.[0-9]+$/ { print $1 }' | sort -u)
+  if [ -n "$shadow" ]; then
+    bad "System CUDA libraries can override the stack's: $(echo $shadow)"
+    note "Usually Ubuntu's nvidia-cuda-toolkit: sudo apt purge nvidia-cuda-toolkit && sudo apt autoremove"
+  else
+    ok "No system CUDA libraries override the stack's"
+  fi
+  # A second index lets a look-alike package on one shadow the real one on the
+  # other (PyTorch's 2022 torchtriton compromise worked this way).
+  # A primary index other than PyPI is a mirror someone else controls. The same
+  # settings can come from PIP_* variables set in a login profile.
+  pip_confs="/etc/pip.conf /etc/xdg/pip/pip.conf /root/.config/pip/pip.conf /root/.pip/pip.conf /home/*/.config/pip/pip.conf /home/*/.pip/pip.conf /opt/sgs/venv/pip.conf /opt/sgs/tools/pip.conf"
+  # shellcheck disable=SC2086
+  extra=$(grep -lsiE '^[[:space:]]*extra-index-url' $pip_confs 2>/dev/null || true)
+  # shellcheck disable=SC2086
+  other=$(grep -sHiE '^[[:space:]]*index-url' $pip_confs 2>/dev/null | grep -viE '=[[:space:]]*https://pypi\.org/simple/?[[:space:]]*$' | cut -d: -f1 | sort -u || true)
+  envs=$(grep -lsE '\bPIP_(EXTRA_)?INDEX_URL=' /etc/environment /etc/profile.d/*.sh /home/*/.bashrc /home/*/.profile /root/.bashrc 2>/dev/null || true)
+  if [ -n "$extra$other$envs" ]; then
+    [ -z "$extra" ] || bad "pip config adds a second package index (dependency-confusion risk): $(echo $extra)"
+    [ -z "$other" ] || bad "pip config uses a package index other than PyPI: $(echo $other)"
+    [ -z "$envs" ] || bad "A login profile sets pip's package index: $(echo $envs)"
+  else
+    ok "pip uses a single package index (PyPI)"
+  fi
+  # .pth files and sitecustomize run code in every Python process. A package's
+  # own are listed in its RECORD; anything else (the stack's hook aside) was
+  # dropped in by hand, which is how Python malware persists.
+  # The tools environment counts too: sgs-check runs its pip-audit as root.
+  # shellcheck disable=SC2046
+  unrecorded=$(/usr/bin/python3 -I - "$SITE" $(ls -d /opt/sgs/tools/lib/python3*/site-packages 2>/dev/null) <<'EOF'
+import csv, glob, os, subprocess, sys
+ours = {"sgs-cuda-preload.pth", "sgs_cuda_preload.py"}
+
+def from_deb(path):
+    # In the OS's own Python (Lambda Stack), apt installs packages: no RECORD.
+    return subprocess.run(["dpkg-query", "-S", path], capture_output=True).returncode == 0
+
+for site in sys.argv[1:]:
+    recorded = set()
+    for rec in glob.glob(os.path.join(site, "*.dist-info", "RECORD")):
+        with open(rec, newline="") as f:
+            recorded.update(os.path.normpath(os.path.join(site, row[0])) for row in csv.reader(f) if row)
+    for name in sorted(os.listdir(site)):
+        path = os.path.join(site, name)
+        # site imports sitecustomize/usercustomize as modules: a package of
+        # that name runs just like the .py file.
+        if (name.endswith(".pth") or name in ("sitecustomize.py", "usercustomize.py", "sitecustomize", "usercustomize")) \
+                and name not in ours and path not in recorded and not from_deb(path):
+            print(path)
+EOF
+)
+  [ -z "$unrecorded" ] && ok "No startup code in the stack beyond what its packages installed" \
+                       || bad "Startup files no package installed run in every Python process of the stack: $(echo $unrecorded)"
+
+  PIP_AUDIT="${SGS_PIP_AUDIT:-/opt/sgs/tools/bin/pip-audit}"
+  # It runs as the user who called sudo, but its verdict is the audit's: only a
+  # pip-audit that only root can change, whether it's the default or not.
+  if [ -e "$PIP_AUDIT" ] && { [ "$(stat -L -c %u "$PIP_AUDIT" 2>/dev/null)" != 0 ] \
+       || [ -n "$(find -L "$PIP_AUDIT" -perm /022 2>/dev/null)" ]; }; then
+    skip "Vulnerability audit skipped: $PIP_AUDIT must be owned by root and writable only by root"
+  elif [ "$QUICK" = 1 ]; then
+    skip "Vulnerability audit skipped (--quick)"
+  elif [ ! -x "$PIP_AUDIT" ]; then
+    skip "Vulnerability audit needs pip-audit (set SGS_PIP_AUDIT=/path/to/pip-audit)"
+  else
+    audit_paths=(--path "$SITE")
+    [ -d /opt/sgs/tf-cuda12 ] && audit_paths+=(--path /opt/sgs/tf-cuda12)
+    for t in /opt/sgs/tools/lib/python3*/site-packages; do [ -d "$t" ] && audit_paths+=(--path "$t"); done
+    audit_home=$(mktemp -d); chown "$run_as" "$audit_home"
+    audit_out=$(runuser -u "$run_as" -- env HOME="$audit_home" "$PIP_AUDIT" "${audit_paths[@]}" --format json --progress-spinner off 2>/dev/null \
+      | SGS_SITE="$SITE" /usr/bin/python3 -I -c '
+import glob, json, os, re, subprocess, sys
+
+def canon(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+def owner(site, name):
+    """Return "ubuntu", "lambda" or "" for a package inside an apt-managed site."""
+    for meta in glob.glob(f"{site}/*.dist-info") + glob.glob(f"{site}/*.egg-info"):
+        if canon(os.path.basename(meta).split("-")[0]) != canon(name):
+            continue
+        r = subprocess.run(["dpkg", "-S", meta], capture_output=True, text=True)
+        if r.returncode:
+            return ""
+        deb = r.stdout.split(":")[0]
+        ver = subprocess.run(["dpkg-query", "-W", "-f=${Version}", deb], capture_output=True, text=True).stdout
+        return "lambda" if "lambda" in ver else "ubuntu"
+    return ""
+
+try:
+    deps = json.load(sys.stdin)["dependencies"]
+except Exception:
+    print("WARN|Vulnerability audit failed to run (network access to PyPI needed)"); sys.exit()
+site = os.environ["SGS_SITE"]
+apt_managed = site.startswith("/usr/lib/python3")
+hits = [(d["name"], d["version"], len(d["vulns"])) for d in deps if d.get("vulns")]
+# Ubuntu often backports fixes without changing the version number, so matches
+# in Ubuntu-maintained packages are reported but not counted as warnings.
+ubuntu = [h for h in hits if apt_managed and owner(site, h[0]) == "ubuntu"]
+counted = [h for h in hits if h not in ubuntu]
+if not counted:
+    print(f"PASS|No known vulnerabilities in {len(deps)} Python packages")
+else:
+    print(f"WARN|{sum(h[2] for h in counted)} vulnerability advisories in {len(counted)} of {len(deps)} Python packages")
+    for name, ver, n in sorted(counted, key=lambda h: -h[2])[:12]:
+        source = owner(site, name) or "pip-installed"
+        print(f"NOTE|  {name} {ver}: {n}" + (f"  ({source} package)" if apt_managed else ""))
+if ubuntu:
+    print(f"NOTE|Not counted: {sum(h[2] for h in ubuntu)} matches in {len(ubuntu)} packages Ubuntu maintains "
+          "(Ubuntu often fixes these without changing the version)")')
+    rm -rf "$audit_home"
+    report "$audit_out" "Vulnerability audit"
+  fi
+
+  # Every installed file must still match the hash its wheel recorded, like
+  # debsums for Python. Hash-checked downloads don't prove what ends up on
+  # disk: on the krabs test bench TensorFlow's CUDA 12 cuDNN and NCCL silently
+  # replaced the CUDA 13 copies PyTorch needs, and `pip check` saw nothing.
+  # This also catches files changed after the install.
+  sites=$(ls -d /opt/sgs/venv/lib/python3*/site-packages /opt/sgs/tools/lib/python3*/site-packages /opt/sgs/tf-cuda12 2>/dev/null || true)
+  if [ "$QUICK" = 1 ]; then
+    skip "File integrity check skipped (--quick)"
+  elif [ -n "$sites" ]; then
+    # shellcheck disable=SC2086
+    integrity_out=$(/usr/bin/python3 -I - $sites <<'EOF' 2>/dev/null
+import base64, csv, glob, hashlib, os, sys
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return base64.urlsafe_b64encode(h.digest()).rstrip(b"=").decode()
+
+claims = {}
+for site in sys.argv[1:]:
+    for rec in glob.glob(os.path.join(site, "*.dist-info", "RECORD")):
+        dist = os.path.basename(os.path.dirname(rec))[: -len(".dist-info")].replace("-", " ", 1)
+        with open(rec, newline="") as f:
+            for row in csv.reader(f):
+                if len(row) >= 2 and row[1].startswith("sha256="):
+                    path = os.path.normpath(os.path.join(site, row[0]))
+                    claims.setdefault(path, []).append((dist, row[1][7:]))
+
+changed, overwritten = [], {}
+for path, owners in claims.items():
+    try:
+        got = digest(path)
+    except OSError:
+        changed.append(path)
+        continue
+    lost = [d for d, want in owners if want != got]
+    if len(lost) == len(owners):
+        changed.append(path)
+    elif lost:
+        won = next(d for d, want in owners if want == got)
+        for d in lost:
+            overwritten[(d, won)] = overwritten.get((d, won), 0) + 1
+
+if not claims:
+    print("WARN|No package records (RECORD files) to check the stack's files against: they were removed")
+elif not changed and not overwritten:
+    print(f"PASS|All {len(claims)} installed files match what their packages recorded")
+if overwritten:
+    print(f"WARN|{sum(overwritten.values())} files of one package were overwritten by another")
+    for (lost, won), n in sorted(overwritten.items()):
+        print(f"NOTE|  {lost}: {n} files replaced by {won}")
+if changed:
+    print(f"WARN|{len(changed)} installed files differ from what their packages recorded (changed after install?)")
+    for path in sorted(changed)[:5]:
+        print(f"NOTE|  {path}")
+EOF
+)
+    report "$integrity_out" "File integrity check"
+  fi
+  # The stack's own files outside pip (the startup hook, its commands, the
+  # Jupyter unit) aren't in any RECORD; the installer records their hashes.
+  if [ -f /opt/sgs/files.sha256 ]; then
+    changed_files=$(sha256sum -c --quiet /opt/sgs/files.sha256 2>/dev/null | cut -d: -f1 || true)
+    recorded=$(grep -cE '^[0-9a-f]{64}  /' /opt/sgs/files.sha256 || true)
+    if [ "$recorded" -lt 5 ]; then
+      bad "The record of the stack's own files is truncated ($recorded entries), so they can't be checked"
+    elif [ -z "$changed_files" ]; then
+      ok "The stack's own files (startup hook, commands, Jupyter unit) are as installed"
+    else
+      bad "The stack's own files changed since the install: $(echo $changed_files)"
+    fi
+  elif [ -f /opt/sgs/manifest.txt ]; then
+    bad "The record of the stack's own files (/opt/sgs/files.sha256) is missing, so they can't be checked"
+  fi
+fi
+# The native GPU stack under the Python packages: the driver's libraries,
+# CUDA, cuDNN, NCCL, the container toolkit and Docker, checked against the
+# hashes dpkg recorded when it installed them. A replaced libcuda.so would
+# otherwise pass unnoticed. Configuration files are left out, since editing
+# those is normal. The kernel module itself isn't in dpkg's records (it's
+# assembled at install); its signature check above covers it. (A root
+# attacker can rewrite dpkg's records too; this catches everything short of
+# that.) Held packages ("hi") count.
+native=$(dpkg-query -W -f '${db:Status-Abbrev} ${Package}\n' 'nvidia-*' 'libnvidia-*' 'linux-modules-nvidia-*' \
+           'linux-objects-nvidia-*' 'linux-signatures-nvidia-*' 'cuda-*' 'libcublas*' 'libcudart*' 'libcudnn*' \
+           'libcufft*' 'libcufile*' 'libcupti*' 'libcurand*' 'libcusolver*' 'libcusparse*' 'libnccl*' 'libnpp*' \
+           'libnvjpeg*' 'libnvjitlink*' 'libnvrtc*' 'libnvfatbin*' 'docker-ce*' 'containerd.io' 'docker-*-plugin' \
+           2>/dev/null | awk '$1 ~ /^[ih]i/ { print $2 }' | sort -u)
+if [ -z "$native" ]; then
+  note "No driver, CUDA or container packages to verify"
+else
+  # Lines are "FLAGS [c] PATH", or "missing [c] PATH"; "c" marks a config file.
+  # shellcheck disable=SC2086
+  verify_out=$(dpkg --verify $native 2>&1)
+  changed=$(echo "$verify_out" | grep -v '^dpkg' | awk 'NF && $2 != "c" { print $NF }')
+  verify_err=$(echo "$verify_out" | grep '^dpkg' | head -1)
+  if [ -n "$verify_err" ]; then
+    bad "Couldn't verify the driver, CUDA and container packages: $verify_err"
+  elif [ -z "$changed" ]; then
+    ok "The driver, CUDA, cuDNN, NCCL and container files match their packages ($(echo "$native" | wc -l) packages)"
+  else
+    bad "Driver, CUDA or container files differ from their packages: $(echo "$changed" | head -5 | tr '\n' ' ')$(n=$(echo "$changed" | wc -l); [ "$n" -le 5 ] || echo "and $((n - 5)) more")"
+  fi
+fi
+
+section "Network exposure"
+# SSH's ports (22, plus any the installer opened for sshd) are exempt only
+# while sshd, or systemd's socket for it, owns them.
+mkdir -p /run/sshd 2>/dev/null || true
+ssh_ports=$(sshd -T 2>/dev/null | awk '$1 == "port" { printf "%s|", $2 }')
+ssh_ports="${ssh_ports%|}"; ssh_ports="${ssh_ports:-22}"
+listening=$(ss -tlnpH | awk '{ print $4, $NF }' | grep -vE '^(127\.|\[::1\]|\[::ffff:127\.)' \
+  | grep -vE ":($ssh_ports) users:\(\(\"(sshd|systemd)\"" | awk '{ print $1 }' | sort -u || true)
+# The Docker API on TCP (a tcp:// entry in daemon.json's "hosts" or a -H flag)
+# is unauthenticated root for anyone who can reach it, localhost included.
+docker_api=$(ss -tlnpH 2>/dev/null | awk '/"dockerd"/ { print $4 }' | sort -u | tr '\n' ' ')
+[ -z "$docker_api" ] || bad "The Docker API listens on TCP ($docker_api): whoever reaches it is root"
+# Sockets bound to the Tailscale interface only answer the owner's own tailnet
+# devices (tailscaled's own ports are always there), so they're listed apart.
+exposed=$(echo "$listening" | grep -vE '%tailscale0:' || true)
+tailnet=$(echo "$listening" | grep -E '%tailscale0:' || true)
+[ -z "$exposed" ] && ok "Only SSH listens on the network" || bad "Listening to the network besides SSH: $(echo $exposed)"
+# Still a WARN behind the firewall (one `ufw disable` exposes them), but say so.
+if [ -n "$exposed" ] && ufw status 2>/dev/null | grep -q "Status: active" \
+   && ufw status verbose 2>/dev/null | grep -q 'deny (incoming)'; then
+  # Ports Docker publishes skip ufw entirely: Docker routes them itself.
+  docker_ports=" $(ss -tlnpH 2>/dev/null | awk '/docker-proxy/ { n = split($4, a, ":"); print a[n] }' | sort -u | tr '\n' ' ')"
+  open=""; via_docker=""
+  for addr in $exposed; do
+    port="${addr##*:}"
+    case "$docker_ports" in
+      *" $port "*) via_docker="$via_docker $port"; continue ;;
+    esac
+    # Verbose output names the port of application-profile rules too ("22/tcp (OpenSSH)").
+    ufw status verbose 2>/dev/null | grep -E "^${port}(/tcp)?[[:space:]]" | grep -q ALLOW && open="$open $port"
+  done
+  [ -n "$via_docker" ] && note "Published by Docker, which goes around the firewall:$via_docker"
+  if [ -n "$open" ]; then note "The firewall lets these through:$open"
+  elif [ -z "$via_docker" ]; then note "The firewall blocks all of these from the network"
+  fi
+fi
+[ -z "$tailnet" ] || note "Reachable only over Tailscale: $(echo $tailnet)"
+# Allow rules beyond SSH open a port whether or not anything listens on it yet.
+if ufw status 2>/dev/null | grep -q "Status: active"; then
+  extra_rules=$(ufw status 2>/dev/null | awk '/ALLOW/ { print $1 }' | grep -vE "^(OpenSSH|22(/tcp)?|(${ssh_ports})(/tcp)?|Anywhere)$" | sort -u | tr '\n' ' ')
+  [ -z "$extra_rules" ] || bad "The firewall allows more than SSH: $extra_rules"
+fi
+# UDP listeners, for the record: ufw's default deny covers them.
+udp=$(ss -ulnH 2>/dev/null | awk '{ print $4 }' | grep -vE '^(127\.|\[::1\]|\[::ffff:127\.)' | grep -vE '%tailscale0:' | sort -u | tr '\n' ' ')
+[ -z "$udp" ] || note "UDP listeners (blocked by the firewall's default deny): $udp"
+# Jupyter servers by command line (`ss` shows only a short process name, which
+# for `python -m jupyterlab` is just "python"), plus the service's main PID.
+# Kernels aren't servers: their command lines name ipykernel.
+jup_pids=$( { for c in /proc/[0-9]*/cmdline; do
+                args=" $(tr '\0' ' ' < "$c" 2>/dev/null) "
+                case "$args" in
+                  (*ipykernel*) ;;
+                  (*jupyter-lab\ *|*jupyter-server\ *|*jupyter-notebook\ *|*" -m jupyterlab "*|*" -m jupyter_server "*|*" -m notebook "*|*"jupyter lab "*|*"jupyter server "*|*"jupyter notebook "*)
+                    c=${c#/proc/}; echo "${c%/cmdline}" ;;
+                esac
+              done
+              for u in $(systemctl list-units --plain --no-legend --state=active 'sgs-jupyter@*' 2>/dev/null | awk '{ print $1 }'); do
+                systemctl show -p MainPID --value "$u"
+              done; } | grep -vx 0 | sort -un)
+jup=$(for pid in $jup_pids; do ss -tlpnH 2>/dev/null | grep "pid=$pid," | awk '{ print $4 }'; done | sort -u)
+jup_sock=$(for pid in $jup_pids; do ss -xlpnH 2>/dev/null | grep "pid=$pid," | awk '{ print $5 }'; done | grep '^/' | sort -u)
+if [ -n "$jup_pids" ] && [ -z "$jup$jup_sock" ]; then
+  bad "Jupyter is running (pid $(echo $jup_pids)) but no listening socket was found for it, so it couldn't be checked"
+fi
+# A localhost port isn't private: every account on the machine (a compromised
+# service, say) and every container on the host network can reach it. The
+# stack's service listens on a Unix socket only its user can open; whether
+# another account can is tested by connecting as nobody, since the folder's
+# mode counts as much as the socket's.
+if [ -z "$jup$jup_sock" ]; then
+  note "JupyterLab isn't running"
+elif [ -n "$jup" ] && echo "$jup" | grep -qvE '^(127\.|\[::1\])'; then
+  bad "JupyterLab is reachable from the network: $(echo $jup)"
+elif [ -n "$jup" ]; then
+  bad "JupyterLab listens on a localhost port every account on the machine can reach: $(echo $jup) (the stack's service uses a private socket)"
+else
+  open_sock=""
+  for sk in $jup_sock; do
+    if [ ! -S "$sk" ]; then
+      open_sock="$open_sock $sk(couldn't check)"
+    elif [ "$(runuser -u nobody -- curl -s -o /dev/null -m 3 -w '%{http_code}' --unix-socket "$sk" http://localhost/api 2>/dev/null)" != 000 ]; then
+      open_sock="$open_sock $sk"
+    fi
+  done
+  [ -z "$open_sock" ] && ok "JupyterLab listens only on a socket its user alone can open (reach it with an SSH tunnel: sgs-jupyter)" \
+                      || bad "JupyterLab's socket can be opened by other accounts:$open_sock"
+  # The tunnel to the socket needs sshd to allow forwarding to Unix sockets.
+  fwd=$(sshd -T 2>/dev/null | awk '$1 == "allowstreamlocalforwarding" || $1 == "disableforwarding" { printf "%s=%s ", $1, $2 }')
+  case "$fwd" in
+    *disableforwarding=yes*|*allowstreamlocalforwarding=no*|*allowstreamlocalforwarding=remote*)
+      bad "SSH doesn't allow tunnels to Unix sockets, so JupyterLab can't be reached ($fwd)" ;;
+  esac
+fi
+if [ -n "$jup$jup_sock" ]; then
+  # Other processes of the same user, or root, can still reach it: every
+  # Jupyter must also refuse requests without its token.
+  no_token=""
+  for sk in $jup_sock; do
+    code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' --unix-socket "$sk" http://localhost/api/kernels 2>/dev/null)
+    case "$code" in 401|403) ;; *) no_token="$no_token $sk(HTTP ${code:-none})" ;; esac
+  done
+  for addr in $jup; do
+    code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${addr##*:}/api/kernels" 2>/dev/null)
+    case "$code" in 401|403) ;; *) no_token="$no_token $addr(HTTP ${code:-none})" ;; esac
+  done
+  [ -z "$no_token" ] && ok "JupyterLab refuses requests without its token" \
+                     || bad "JupyterLab answered a request without a token:$no_token"
+  # On Lambda the Jupyter user has passwordless sudo, so without NoNewPrivileges
+  # a malicious package or model loaded in a notebook is one `sudo` from root.
+  can_sudo=""
+  for jpid in $jup_pids; do
+    [ "$(awk '/^NoNewPrivs:/ { print $2 }' "/proc/$jpid/status" 2>/dev/null)" = 1 ] || can_sudo="$can_sudo $jpid"
+  done
+  [ -z "$can_sudo" ] && ok "Code running in Jupyter can't become root through sudo" \
+                     || bad "Code running in Jupyter can become root through sudo or setuid programs (pid$can_sudo)"
+  # A token Jupyter generates itself goes into its startup URL in the journal,
+  # which the adm group can read. The service's token is reused across restarts,
+  # so look for the current one anywhere in the journal.
+  for unit in $(systemctl list-units --plain --no-legend 'sgs-jupyter@*' 2>/dev/null | awk '{ print $1 }'); do
+    u="${unit#sgs-jupyter@}"; u="${u%.service}"
+    tokfile="$(getent passwd "$u" | cut -d: -f6)/.local/share/jupyter/sgs-token"
+    since=$(systemctl show -p ActiveEnterTimestamp --value "$unit")
+    if { [ -s "$tokfile" ] && journalctl -u "$unit" --no-pager 2>/dev/null | grep -qF "$(cat "$tokfile")"; } \
+       || journalctl -u "$unit" --since "$since" --no-pager 2>/dev/null | grep -qE 'token=[0-9a-f]{16}'; then
+      bad "Jupyter's login token is in the system journal ($unit), readable by the adm group"
+    else
+      ok "Jupyter's login token stays out of the system journal"
+    fi
+    if [ -e "$tokfile" ] && [ -n "$(find "$tokfile" -perm /077 2>/dev/null)" ]; then
+      bad "Jupyter's token file can be read by other users: $tokfile"
+    fi
+  done
+fi
+# The Jupyter service's sandbox, by systemd's own score, for every instance
+# (running or not), so a drop-in that weakens it (sgs-jupyter@.service.d/)
+# shows up as well: 2.2 as shipped, 8.5 without it. Anything above 3.0 means
+# part of it is gone.
+for unit in $( { systemctl list-units --all --plain --no-legend 'sgs-jupyter@*' 2>/dev/null | awk '{ print $1 }'
+                 ls /etc/systemd/system/*.wants/ 2>/dev/null | grep '^sgs-jupyter@.\+\.service$'; } | sort -u); do
+  score=$(systemd-analyze security --no-pager "$unit" 2>/dev/null \
+          | awk '/Overall exposure level/ { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+$/) { print $i; exit } }')
+  if [ -z "$score" ]; then
+    skip "Couldn't score Jupyter's sandbox ($unit)"
+  elif awk -v s="$score" 'BEGIN { exit !(s <= 3.0) }'; then
+    ok "Jupyter's sandbox is in place ($unit: exposure $score by systemd-analyze security)"
+  else
+    bad "Jupyter's sandbox is weakened ($unit: exposure $score, 2.2 as shipped; look in /etc/systemd/system/${unit%.service}.service.d/)"
+  fi
+done
+# Cloud metadata services hand out credentials or launch data on some clouds.
+# Tested the way an ordinary account would try: refused at once (curl exit 7)
+# with the guard's table loaded. A timeout means nothing stopped it.
+md_rc=0
+runuser -u nobody -- curl -s -o /dev/null -m 4 http://169.254.169.254/ 2>/dev/null || md_rc=$?
+guard_rules=$(nft list table inet sgs_guard 2>/dev/null)
+if [ "$md_rc" = 7 ] && echo "$guard_rules" | grep -q 'ip daddr 169.254.169.254 meta skuid != 0 reject' \
+   && echo "$guard_rules" | grep -q 'ip daddr 169.254.169.254 reject' \
+   && echo "$guard_rules" | grep -q 'socket cgroupv2 level 1 "docker.slice" ip daddr 169.254.169.254 reject'; then
+  # The container rules cover containers under docker.slice, which daemon.json
+  # makes the default.
+  if command -v docker >/dev/null && [ "$(python3 -I -c 'import json; print(json.load(open("/etc/docker/daemon.json")).get("cgroup-parent", ""))' 2>/dev/null)" != docker.slice ]; then
+    bad "New containers aren't put under docker.slice (cgroup-parent in /etc/docker/daemon.json), so one on the host's network can reach cloud metadata"
+  else
+    ok "Ordinary users and containers can't reach the cloud metadata service (169.254.169.254)"
+  fi
+elif [ "$md_rc" = 0 ]; then
+  bad "Ordinary users can read the cloud metadata service (169.254.169.254), which can hold credentials or launch data"
+else
+  bad "Nothing stops ordinary users or containers from reaching the cloud metadata address (169.254.169.254)"
+fi
+# The optional strict outbound mode (sgs-egress). When it's on, test it the
+# way it matters: an ordinary account trying a raw address must be refused.
+if [ "$(cat /etc/sgs/egress-mode 2>/dev/null)" = strict ]; then
+  if ! nft list table inet sgs_egress >/dev/null 2>&1 || ! systemctl is-active --quiet sgs-egress-dns.service \
+     || ! resolvectl dns 2>/dev/null | grep -q '127\.0\.0\.2'; then
+    bad "Strict outbound mode is on but not in force (its firewall table, resolver or DNS setting is missing): sudo sgs-egress strict"
+  elif runuser -u nobody -- curl -s -o /dev/null -m 5 https://1.1.1.1/ 2>/dev/null; then
+    bad "Strict outbound mode is on, but an ordinary account still reached 1.1.1.1"
+  else
+    ok "Outbound traffic is limited to $(grep -cvE '^[[:space:]]*(#|$)' /etc/sgs/egress-allow) allowed domains (sgs-egress strict)"
+  fi
+elif [ -x /usr/local/sbin/sgs-egress ]; then
+  note "Outbound traffic isn't limited (for sensitive work: sudo sgs-egress strict)"
+fi
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+  ufw status verbose | grep -q 'deny (incoming)' && ok "Firewall blocks incoming connections by default" \
+                                                  || bad "Firewall is on but allows incoming connections by default"
+else
+  bad "Firewall is off: every listening program is reachable"
+fi
+
+section "Kernel and audit"
+low=""
+for want in kernel.kptr_restrict:1 kernel.dmesg_restrict:1 kernel.unprivileged_bpf_disabled:1 \
+            kernel.io_uring_disabled:1 kernel.yama.ptrace_scope:1 kernel.perf_event_paranoid:2 \
+            fs.protected_symlinks:1 fs.protected_hardlinks:1 fs.protected_fifos:1 fs.protected_regular:2; do
+  got=$(sysctl -n "${want%:*}" 2>/dev/null || echo 0)
+  [ "$got" -ge "${want##*:}" ] || low="$low ${want%:*}=$got"
+done
+# Strictest at 0: line-discipline autoload, and ICMP redirects on every
+# interface (IPv4 sends one if "all" or the interface says so; IPv6 reads only
+# the interface), loopback aside.
+got=$(sysctl -n dev.tty.ldisc_autoload 2>/dev/null || echo 0)
+[ "$got" = 0 ] || low="$low dev.tty.ldisc_autoload=$got"
+# Setuid programs don't dump core (0 is strictest; Ubuntu defaults to 2).
+got=$(sysctl -n fs.suid_dumpable 2>/dev/null || echo 0)
+[ "$got" = 0 ] || low="$low fs.suid_dumpable=$got"
+redir=""
+for f in /proc/sys/net/ipv4/conf/*/accept_redirects /proc/sys/net/ipv4/conf/*/send_redirects \
+         /proc/sys/net/ipv6/conf/*/accept_redirects; do
+  case "$f" in */conf/lo/*) continue ;; esac
+  [ "$(cat "$f" 2>/dev/null)" = 0 ] || redir="$redir $(echo "${f#/proc/sys/}" | tr / .)=$(cat "$f" 2>/dev/null)"
+done
+[ -z "$redir" ] || low="$low$(echo $redir | tr ' ' '\n' | head -5 | sed 's/^/ /' | tr -d '\n')$( [ "$(echo $redir | wc -w)" -le 5 ] || echo " (and more)")"
+[ -z "$low" ] && ok "Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, io_uring or line-discipline loading, no setuid core dumps, ptrace and perf limits, no ICMP redirects)" \
+              || bad "Kernel hardening settings loosened:$low"
+# Kernel lockdown: even root can't load unsigned modules, write kernel memory
+# or kexec an unsigned kernel. Secure Boot turns it on; install.sh sets it on
+# the kernel command line otherwise (not with DKMS modules installed).
+lockdown=$(sed -n 's/.*\[\([a-z]*\)\].*/\1/p' /sys/kernel/security/lockdown 2>/dev/null)
+dk=$(dkms status 2>/dev/null | cut -d, -f1 | cut -d/ -f1 | sort -u | paste -sd' ' -)
+case "$lockdown" in
+  integrity|confidentiality)
+    # A module it refuses, such as one DKMS built after the install, is a
+    # device that silently stopped working. A DKMS module counts as unsigned:
+    # its key is the machine's own, which the kernel trusts only once enrolled
+    # through Secure Boot. Without Secure Boot, that's known without waiting
+    # for the kernel's message; with it, the message (this boot) tells.
+    if [ -n "$dk" ] && grep -q 'lockdown=' /proc/cmdline; then
+      if [ -f /etc/default/grub.d/60-sgs-lockdown.cfg ]; then
+        bad "DKMS modules ($dk) have no trusted signature without Secure Boot, so kernel lockdown refuses them. To turn lockdown off: sudo rm /etc/default/grub.d/60-sgs-lockdown.cfg && sudo update-grub && sudo reboot"
+      else
+        bad "DKMS modules ($dk) have no trusted signature without Secure Boot, so kernel lockdown refuses them until it turns off at the next boot (sudo reboot)"
+      fi
+    elif journalctl -k -b 0 --no-pager -q 2>/dev/null | grep -q 'unsigned module loading is restricted'; then
+      if ! grep -q 'lockdown=' /proc/cmdline; then
+        bad "Kernel lockdown (from Secure Boot) refused a kernel module without a trusted signature this boot (sudo dkms status): enroll its key with sudo mokutil --import"
+      elif [ -f /etc/default/grub.d/60-sgs-lockdown.cfg ]; then
+        bad "Kernel lockdown refused a kernel module without a trusted signature this boot (sudo dkms status). To turn lockdown off: sudo rm /etc/default/grub.d/60-sgs-lockdown.cfg && sudo update-grub && sudo reboot"
+      else
+        bad "Kernel lockdown refused a kernel module without a trusted signature this boot (sudo dkms status); it turns off at the next boot (sudo reboot)"
+      fi
+    else
+      ok "Kernel lockdown is on ($lockdown): even root can't load unsigned modules or write kernel memory"
+    fi ;;
+  none)
+    if [ -f /etc/default/grub.d/60-sgs-lockdown.cfg ] && ! grep -q 'lockdown=' /proc/cmdline; then
+      bad "Kernel lockdown is off until the next boot (sudo reboot)"
+    elif [ -n "$dk" ]; then
+      bad "Kernel lockdown is off, since DKMS modules ($dk) have no trusted signature without Secure Boot: root can load unsigned kernel modules and write kernel memory"
+    else
+      bad "Kernel lockdown is off: root can load unsigned kernel modules and write kernel memory, a rootkit's way in"
+    fi ;;
+  *) bad "Kernel lockdown isn't available on this kernel (no /sys/kernel/security/lockdown): root can load unsigned kernel modules and write kernel memory" ;;
+esac
+# Unprivileged user namespaces, a common step in kernel exploits, tested the
+# way an attacker would try: directly, and through aa-exec into an AppArmor
+# profile that allows them (the bypass Qualys published in 2025).
+if [ "$(aa-enabled 2>/dev/null)" != Yes ]; then
+  bad "AppArmor is off, so nothing limits unprivileged user namespaces"
+else
+  userns_open=""
+  runuser -u nobody -- unshare -Ur true 2>/dev/null && userns_open=" directly"
+  # Up to three loaded profiles that allow them: any one is enough for the bypass.
+  tried=""
+  # The profile whose block holds the rule, not just any profile in the file.
+  for prof in $(grep -ls '^[[:space:]]*userns,' /etc/apparmor.d/* 2>/dev/null \
+                | xargs -r awk '$1 == "profile" { name = $2 } /^[[:space:]]*userns,/ && name { print name }' | sort -u); do
+    awk -v p="$prof" '$1 == p { f = 1 } END { exit !f }' /sys/kernel/security/apparmor/profiles 2>/dev/null || continue
+    tried="$tried $prof"
+    if runuser -u nobody -- aa-exec -p "$prof" -- unshare -Ur true 2>/dev/null; then
+      userns_open="$userns_open through aa-exec -p $prof"; break
+    fi
+    [ "$(echo $tried | wc -w)" -lt 3 ] || break
+  done
+  if [ -n "$userns_open" ]; then
+    bad "Ordinary users can create user namespaces:$userns_open (kernel.apparmor_restrict_unprivileged_*)"
+  elif [ -n "$tried" ]; then
+    ok "Ordinary users can't create user namespaces, even through aa-exec (tried$tried)"
+  else
+    ok "Ordinary users can't create user namespaces (no loaded profile allows them, so aa-exec can't either)"
+  fi
+fi
+if command -v auditctl >/dev/null; then
+  # All of the stack's rules loaded, not just some: one dummy rule mustn't pass.
+  rules=$(auditctl -l 2>/dev/null | grep -cE '(-k |key=)sgs-' || true)
+  want_rules=$(grep -vE '^[[:space:]]*#' /etc/audit/rules.d/60-sgs.rules 2>/dev/null | grep -cE '(-k |key=)sgs-' || true)
+  if [ "$rules" -eq 0 ]; then
+    bad "No audit rules watch the machine's configuration (auditd runs with its defaults only)"
+  elif [ -n "$want_rules" ] && [ "$want_rules" -gt 0 ] && [ "$rules" -lt "$want_rules" ]; then
+    bad "Only $rules of the stack's $want_rules audit rules are loaded (sudo augenrules --load)"
+  else
+    ok "Audit log records changes to package sources, sudo, SSH, Docker, GPU hooks and the stack ($rules rules)"
+  fi
+else
+  bad "auditd isn't installed: changes leave no audit trail"
+fi
+
+section "Secrets"
+# Ubuntu 24.04 creates home folders as 750, so other users can't look inside.
+# The tokens ML tools save (Hugging Face, W&B in .netrc, cloud CLIs, Kaggle)
+# should be readable by their owner only either way.
+open_homes=$(find /home -mindepth 1 -maxdepth 1 -type d -perm /005 2>/dev/null || true)
+[ -z "$open_homes" ] && ok "Home folders are closed to other users" \
+                     || bad "Other users can look inside these home folders: $(echo $open_homes)"
+loose=$(for h in /root /home/*; do
+  for f in .cache/huggingface/token .huggingface/token .netrc .aws/credentials \
+           .config/gcloud/application_default_credentials.json .config/gcloud/credentials.db \
+           .kaggle/kaggle.json .ssh/id_rsa .ssh/id_ecdsa .ssh/id_ed25519; do
+    [ -f "$h/$f" ] && [ -n "$(find "$h/$f" -perm /077 2>/dev/null)" ] && echo "$h/$f"
+  done
+done)
+[ -z "$loose" ] && ok "Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner" \
+                || bad "Tokens or keys other users can read: $(echo $loose)"
+
+# Startup files changed since they were last accepted (see startup_files).
+if [ -s "$STARTUP_RECORD" ] && grep -q '^place ' "$STARTUP_RECORD"; then
+  now_list=$(mktemp)
+  startup_files > "$now_list"
+  diffs=$(startup_compare "$STARTUP_RECORD" "$now_list")
+  rm -f "$now_list"
+  # At most 8 paths of each kind in the message; the count says how many more.
+  list_of() { echo "$diffs" | sed -n "s/^$1 //p" | awk -v n="$(echo "$diffs" | grep -c "^$1 ")" \
+                'NR <= 8 { printf " %s", $0 } END { if (n > 8) printf " (and %d more)", n - 8 }'; }
+  changed_startup=$(list_of C); gone_startup=$(list_of G); new_places=$(list_of P)
+  if [ -z "$changed_startup$gone_startup$new_places" ]; then
+    ok "No cron job, service, startup file, login hook or SSH key changed since it was last accepted"
+  else
+    [ -z "$changed_startup$gone_startup" ] \
+      || bad "Startup files changed since last accepted:${changed_startup:+ new or changed:$changed_startup}${gone_startup:+ gone:$gone_startup} (check them, then: sudo sgs-check --accept-changes)"
+    [ -z "$new_places" ] \
+      || bad "Places this sgs-check watches that its record doesn't yet:$new_places (check them, then: sudo sgs-check --accept-changes)"
+  fi
+elif [ -s "$STARTUP_RECORD" ]; then
+  bad "The record of startup files is from an older sgs-check (check them, then: sudo sgs-check --accept-changes)"
+else
+  install -d -m 0700 "$(dirname "$STARTUP_RECORD")"
+  ( umask 077; startup_files > "$STARTUP_RECORD" )
+  note "Recorded $(grep -vc '^place ' "$STARTUP_RECORD") startup files to watch for changes (cron, services, startup files, login hooks, SSH keys)"
+fi
+
+section "SSH"
+# Ubuntu 24.04 starts sshd on the first connection (socket activation), and
+# `sshd -T` refuses to run until its privilege-separation directory exists.
+[ -d /run/sshd ] || mkdir -p /run/sshd 2>/dev/null || true
+sshd_settings=$(sshd -T 2>/dev/null)
+if [ -z "$sshd_settings" ]; then
+  skip "Couldn't read SSH settings"
+else
+  setting() { echo "$sshd_settings" | awk -v k="$1" '$1 == k { print $2 }'; }
+  # Keyboard-interactive login goes through PAM, which usually asks for the password.
+  if [ "$(setting passwordauthentication)" = "no" ] && [ "$(setting kbdinteractiveauthentication)" = "no" ]; then
+    ok "Password login is off"
+  else
+    bad "Password login is on (PasswordAuthentication $(setting passwordauthentication), KbdInteractiveAuthentication $(setting kbdinteractiveauthentication))"
+  fi
+  [ "$(setting permitrootlogin)" = "no" ] && ok "Root can't log in" || bad "Root login allowed ($(setting permitrootlogin))"
+  # Ubuntu's sshd_config turns it on. Whoever takes over this machine could
+  # then reach the screen and keystrokes of anyone connected with `ssh -X`.
+  [ "$(setting x11forwarding)" = "no" ] && ok "X11 forwarding is off (a compromised server can't reach your desktop)" \
+    || bad "X11 forwarding is on: whoever takes over this machine can reach the screen and keystrokes of users connected with ssh -X"
+  # A Match block can change these for some users or addresses: check the
+  # values that apply to the people who log in (sudo and video members).
+  if grep -qiE '^[[:space:]]*Match[[:space:]]' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; then
+    match_bad=""
+    for u in $(getent group sudo video | cut -d: -f4 | tr ',' '\n' | sort -u); do
+      eff=$(sshd -T -C "user=$u,host=localhost,addr=127.0.0.1" 2>/dev/null)
+      for k in passwordauthentication kbdinteractiveauthentication x11forwarding; do
+        v=$(echo "$eff" | awk -v k="$k" '$1 == k { print $2 }')
+        [ -z "$v" ] || [ "$v" = no ] || match_bad="$match_bad $u:$k=$v"
+      done
+    done
+    [ -z "$match_bad" ] && ok "SSH Match blocks don't loosen these settings for anyone who logs in" \
+                       || bad "SSH Match blocks loosen settings for some users:$match_bad"
+  fi
+fi
+
+# A daily re-run makes drift visible at login without anyone running this.
+if [ -f /opt/sgs/manifest.txt ]; then
+  if systemctl is-enabled --quiet sgs-check.timer 2>/dev/null && systemctl is-active --quiet sgs-check.timer; then
+    ok "This check re-runs daily, and the login message shows its latest result (sgs-check.timer)"
+  else
+    bad "Nothing re-checks this machine daily: sgs-check.timer is off (sudo systemctl enable --now sgs-check.timer)"
+  fi
+fi
+
+section "Updates"
+pending=$(apt list --upgradable 2>/dev/null | grep -c 'upgradable from')
+security=$(apt list --upgradable 2>/dev/null | grep -c -- '-security')
+if [ "$security" -gt 0 ]; then bad "$security security updates waiting to be installed"
+elif [ "$APT_OK" = 0 ]; then skip "Can't tell whether security updates are pending (apt's lists are stale)"
+else ok "No pending security updates"; fi
+[ "$pending" -gt "$security" ] && note "$((pending - security)) other (non-security) updates available"
+[ "$(apt-config dump APT::Periodic::Unattended-Upgrade | grep -o '"[0-9]*"')" = '"1"' ] \
+  && ok "Automatic security updates are on" || bad "Automatic security updates are off"
+# Ask unattended-upgrades itself whether the packages that guard containers
+# would update automatically. A pattern that matches nothing looks fine in the
+# config; the stack's first version had exactly that for Docker and NVIDIA.
+uu_out=$(/usr/bin/python3 -I - <<'EOF' 2>/dev/null
+import importlib.machinery, importlib.util, sys
+try:
+    import apt, apt_pkg
+    loader = importlib.machinery.SourceFileLoader("uu", "/usr/bin/unattended-upgrade")
+    spec = importlib.util.spec_from_loader("uu", loader)
+    uu = importlib.util.module_from_spec(spec)
+    loader.exec_module(uu)
+    apt_pkg.init_config()
+    allowed = uu.get_allowed_origins()
+    cache = apt.Cache()
+except Exception as e:
+    print(f"SKIP|Couldn't ask unattended-upgrades which sources it updates ({type(e).__name__})")
+    sys.exit()
+missed = []
+for name in ("docker-ce", "containerd.io", "nvidia-container-toolkit", "libnvidia-container1",
+             "cuda-toolkit-13-0", "libcudnn9-cuda-13", "libnccl2"):
+    if name in cache and cache[name].is_installed and cache[name].candidate:
+        # Only the repositories it comes from: an installed package also has a
+        # local "now" origin (dpkg's status file), which always counts as allowed.
+        origins = [o for o in cache[name].candidate.origins if o.archive != "now" and o.site]
+        if origins and not any(uu.is_allowed_origin(o, allowed) for o in origins):
+            missed.append(f"{name} ({origins[0].origin} / {origins[0].label})")
+if missed:
+    print("WARN|Automatic updates skip these packages: " + ", ".join(missed))
+else:
+    print("PASS|Automatic updates cover Docker, the NVIDIA Container Toolkit, CUDA, cuDNN and NCCL")
+EOF
+)
+report "$uu_out" "Update coverage check"
+# "On" in the settings isn't proof. On the krabs test bench a hung apt job held
+# apt's lock for 99 days, so nothing was patched while these settings said on.
+stamp=/var/lib/apt/periodic/upgrade-stamp
+installed=$(sed -n 's/^installed=//p' /opt/sgs/manifest.txt 2>/dev/null)
+if [ ! -e "$stamp" ] && [ -n "$installed" ] && [ $(( $(date +%s) - $(date -d "$installed" +%s 2>/dev/null || date +%s) )) -gt 259200 ]; then
+  bad "Automatic updates haven't completed a run since the stack was installed ($installed)"
+elif [ ! -e "$stamp" ]; then
+  note "Automatic updates haven't completed a run yet"
+elif [ -n "$(find "$stamp" -mmin +4320 2>/dev/null)" ]; then
+  bad "Automatic updates last completed a run $(( ($(date +%s) - $(stat -c %Y "$stamp")) / 86400 )) days ago"
+else
+  ok "Automatic updates completed a run in the last 3 days"
+fi
+for unit in apt-daily apt-daily-upgrade; do
+  if [ "$(systemctl show -p ActiveState --value "$unit.service" 2>/dev/null)" = activating ]; then
+    since=$(date -d "$(systemctl show -p StateChangeTimestamp --value "$unit.service")" +%s 2>/dev/null || echo 0)
+    [ $(( $(date +%s) - since )) -lt 14400 ] || bad "$unit.service has been running for $(( ($(date +%s) - since) / 3600 )) hours: apt is stuck"
+  fi
+done
+no_limit=""
+for unit in apt-daily apt-daily-upgrade; do
+  [ "$(systemctl show -p TimeoutStartUSec --value "$unit.service" 2>/dev/null)" != infinity ] || no_limit="$no_limit $unit"
+done
+[ -z "$no_limit" ] && ok "apt's daily jobs have a time limit, so a hung download can't block updates for good" \
+                   || bad "apt's daily jobs have no time limit:$no_limit (one hung run can block every update)"
+[ -f /var/run/reboot-required ] && bad "Updates are waiting for a reboot to take effect" || ok "No reboot needed"
+
+if [ "$GPU_TEST" = 1 ]; then
+  section "GPU test"
+  if ! command -v nvidia-smi >/dev/null || ! nvidia-smi -L >/dev/null 2>&1; then
+    skip "No working GPU driver"
+  elif [ -z "$PY" ]; then
+    skip "No ML stack to test"
+  else
+    nvidia-smi -L | sed 's/^/         /'
+    # Each framework runs in its own process, so one framework's CUDA libraries
+    # can't make another look healthy. It must compute on the GPU and the result
+    # must be on the GPU: seeing a device proves nothing.
+    cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | sort -V | head -1)
+    # The frameworks are the stack's own code: run them as the user who called
+    # sudo (or nobody), never as root, with a throwaway home for their caches.
+    gpu_home=$(mktemp -d); chown "$run_as" "$gpu_home"
+    for fw in torch jax tensorflow; do
+      gpu_out=$(runuser -u "$run_as" -- env HOME="$gpu_home" SGS_GPU_CC="$cc" "$PY" -I - "$fw" <<'EOF' 2>/dev/null
+import os, sys, time
+fw, cc = sys.argv[1], os.environ.get("SGS_GPU_CC", "")
+# Oldest GPU each framework's CUDA build supports: PyTorch and JAX use CUDA 13
+# (Turing, 7.5+), TensorFlow 2.21 uses CUDA 12.5 (Pascal, 6.0+). Failing on an
+# older GPU is expected, so that's a SKIP, not a WARN.
+need = {"torch": (7, 5), "jax": (7, 5), "tensorflow": (6, 0)}[fw]
+too_old = bool(cc) and tuple(int(p) for p in cc.split(".")) < need
+name = {"torch": "PyTorch", "jax": "JAX", "tensorflow": "TensorFlow"}[fw]
+N = 4096
+
+def tflops(t):
+    return f"{10 * 2 * N**3 / t / 1e12:.1f} TFLOP/s (fp32 matmul)"
+
+try:
+    if fw == "torch":
+        import torch
+        name = f"PyTorch {torch.__version__}"
+        a = torch.randn(N, N, device="cuda"); a @ a; torch.cuda.synchronize(); t = time.time()
+        for _ in range(10): a @ a
+        torch.cuda.synchronize()
+        on_gpu, detail = True, f"{tflops(time.time() - t)} on {torch.cuda.get_device_name(0)}"
+    elif fw == "jax":
+        import jax, jax.numpy as jnp
+        name = f"JAX {jax.__version__}"
+        a = jnp.ones((N, N)); (a @ a).block_until_ready(); t = time.time()
+        for _ in range(10): y = a @ a
+        y.block_until_ready()
+        platform = next(iter(y.devices())).platform
+        on_gpu, detail = platform == "gpu", f"{tflops(time.time() - t)} on {platform}"
+    else:
+        import tensorflow as tf
+        name = f"TensorFlow {tf.__version__}"
+        # Without this, TensorFlow quietly runs on the CPU when it can't use the GPU.
+        tf.config.set_soft_device_placement(False)
+        with tf.device("/GPU:0"):
+            a = tf.random.normal((N, N)); tf.linalg.matmul(a, a).numpy(); t = time.time()
+            for _ in range(10): y = tf.linalg.matmul(a, a)
+            y.numpy()
+        on_gpu, detail = "GPU" in y.device, f"{tflops(time.time() - t)} on {y.device.split('/')[-1]}"
+except Exception as e:
+    on_gpu, detail = False, (str(e).strip().splitlines() or [type(e).__name__])[0][:160]
+
+if on_gpu:
+    print(f"PASS|{name}: {detail}")
+elif too_old:
+    print(f"SKIP|{name} can't use this GPU (compute capability {cc}; its CUDA build needs {need[0]}.{need[1]}+)")
+else:
+    print(f"WARN|{name} GPU test failed: {detail}")
+EOF
+)
+      report "$gpu_out" "GPU test ($fw)"
+    done
+    rm -rf "$gpu_home"
+  fi
+fi
+
+echo
+echo "== Result: $passes PASS, $warns WARN, $skips SKIP"
+[ "$warns" -eq 0 ]

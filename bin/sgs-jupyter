@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# sgs-jupyter: show how to reach this machine's JupyterLab.
+#
+# JupyterLab listens on a Unix socket only you can open, not on a network or
+# localhost port, so nobody on the internet and no other account on this
+# machine can reach it. You connect through an SSH tunnel from your own
+# computer: SSH forwards a local port to the socket.
+set -euo pipefail
+
+user="$(id -un)"
+if ! systemctl is-active --quiet "sgs-jupyter@${user}"; then
+  echo "JupyterLab isn't running for ${user}. Start it with:"
+  echo "  sudo systemctl enable --now sgs-jupyter@${user}"
+  exit 1
+fi
+
+# The token is in a file only you can read; delete it and restart the service
+# to get a new one.
+sock="/run/sgs-jupyter/${user}/jupyter.sock"
+tokfile="$HOME/.local/share/jupyter/sgs-token"
+# The address other machines use (the default route's source), not a Docker bridge.
+addr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1) }')"
+[ -n "$addr" ] || addr="<this-machine's-IP>"
+if [ -r "$tokfile" ]; then
+  url="http://localhost:8888/lab?token=$(cat "$tokfile")"
+else
+  url="http://localhost:8888/lab  (token: in ${tokfile})"
+fi
+
+cat <<EOF
+JupyterLab is running on this machine, on a private socket: ${sock}
+
+1. On your own computer, open the tunnel (leave it running):
+     ssh -N -L 8888:${sock} ${user}@${addr}
+
+2. Then open this in your browser:
+     ${url}
+
+A Jupyter client on your computer (VS Code, say) uses the same URL while the
+tunnel is open. PuTTY can't forward to a socket: use Windows' own ssh, or WSL.
+With VS Code Remote-SSH you don't need this server: pick the stack's Python,
+/opt/sgs/venv/bin/python, as the kernel.
+EOF

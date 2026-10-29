@@ -1,0 +1,79 @@
+Waiting for another sgs-check run to finish...
+
+== Machine
+  Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic, arm64
+  NVIDIA GPUs: 0
+  Stack: Secure GPU Stack 0.1.0
+
+== Package sources
+  [PASS] download.docker.com: HTTPS, key limited to this source
+  [PASS] developer.download.nvidia.com: HTTPS, key limited to this source
+  [PASS] sgs-nvidia-cuda.gpg is still the key pinned at install (EB693B3035CD5710E231E123A4B469963BF863CC)
+  [PASS] sgs-docker.gpg is still the key pinned at install (9DC858229FC7DD38854AE2D88D81803C0EBFCD88)
+  [PASS] No third-party key is trusted for every repository
+  [PASS] No apt pin can override Ubuntu's updates or force downgrades
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [SKIP] No NVIDIA driver or GPU on this machine
+
+== Containers
+  [PASS] NVIDIA Container Toolkit 1.20.1
+  [PASS] Nobody is in the root-equivalent docker group
+  [PASS] Published container ports stay on localhost unless asked otherwise, on every Docker network
+  [PASS] Containers can't gain privileges through setuid programs
+  [PASS] Containers get the GPU only when asked (--gpus or --device)
+
+== Python ML stack
+  [PASS] Stack lives in its own environment, separate from the OS's Python
+         torch 2.15.0   tensorflow 2.21.0   keras 3.15.1   jax 0.12.0.1   jupyterlab 4.6.4
+  [PASS] The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)
+  [PASS] Stack packages are read-only for users
+  [PASS] Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root
+  [PASS] No system CUDA libraries override the stack's
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [PASS] No known vulnerabilities in 178 Python packages
+  [PASS] All 54215 installed files match what their packages recorded
+  [PASS] The stack's own files (startup hook, commands, Jupyter unit) are as installed
+  [PASS] The driver, CUDA, cuDNN, NCCL and container files match their packages (67 packages)
+
+== Network exposure
+  [PASS] Only SSH listens on the network
+         UDP listeners (blocked by the firewall's default deny): 192.168.252.7%enp0s1:68 [fe80::5054:ff:fea8:8d40]%enp0s1:546 
+  [PASS] JupyterLab listens only on a socket its user alone can open (reach it with an SSH tunnel: sgs-jupyter)
+  [PASS] JupyterLab refuses requests without its token
+  [PASS] Code running in Jupyter can't become root through sudo
+  [PASS] Jupyter's login token stays out of the system journal
+  [PASS] Jupyter's sandbox is in place (sgs-jupyter@ubuntu.service: exposure 2.2 by systemd-analyze security)
+  [PASS] Ordinary users and containers can't reach the cloud metadata service (169.254.169.254)
+         Outbound traffic isn't limited (for sensitive work: sudo sgs-egress strict)
+  [PASS] Firewall blocks incoming connections by default
+
+== Kernel and audit
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, io_uring or line-discipline loading, no setuid core dumps, ptrace and perf limits, no ICMP redirects)
+  [PASS] Kernel lockdown is on (integrity): even root can't load unsigned modules or write kernel memory
+  [PASS] Ordinary users can't create user namespaces, even through aa-exec (tried 1password Discord QtWebEngineProcess)
+  [PASS] Audit log records changes to package sources, sudo, SSH, Docker, GPU hooks and the stack (17 rules)
+
+== Secrets
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+  [WARN] Startup files changed since last accepted: new or changed: /home/mallory/.bash_logout /home/mallory/.bashrc /home/mallory/.profile (check them, then: sudo sgs-check --accept-changes)
+
+== SSH
+  [PASS] Password login is off
+  [PASS] Root can't log in
+  [PASS] X11 forwarding is off (a compromised server can't reach your desktop)
+  [PASS] This check re-runs daily, and the login message shows its latest result (sgs-check.timer)
+
+== Updates
+  [PASS] No pending security updates
+         8 other (non-security) updates available
+  [PASS] Automatic security updates are on
+  [PASS] Automatic updates cover Docker, the NVIDIA Container Toolkit, CUDA, cuDNN and NCCL
+         Automatic updates haven't completed a run yet
+  [PASS] apt's daily jobs have a time limit, so a hung download can't block updates for good
+  [PASS] No reboot needed
+
+== Result: 46 PASS, 1 WARN, 1 SKIP
