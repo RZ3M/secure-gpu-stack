@@ -130,8 +130,8 @@ TensorFlow and JAX in the system Python. Options:
 
 - **On GitHub:** `RZ3M/secure-gpu-stack` (public since 2026-10-29). The v0.1.0 release holds
   the walkthrough videos and the first install tarball. v0.1.1 (2026-10-29,
-  with the M2 fixes) is the current tarball; its SHA-256 is in the annotated
-  `v0.1.1` tag.
+  with the M2 fixes) is the current tarball, and holds the M2 update video;
+  the tarball's SHA-256 is in the annotated `v0.1.1` tag.
 - **Walkthrough videos:** `video/` (8:50) and `video/m2/` (the M2 update,
   3:38); see `video/README.md`.
 - **Goal and success criteria:** `README.md`.
@@ -337,10 +337,10 @@ TensorFlow and JAX in the system Python. Options:
 - [x] M2 update video and summary page (2026-10-29): `video/m2/`, 3:38, same
   voice. The two videos now share `video/kit.css` and `video/kit.js`; both
   build scripts take the video's folder (`node video/render.mjs video/m2`).
-  The MP4 stays on the user's Mac (`video/m2/out/`): the user shares it, so
-  don't upload it. The summary page
-  (https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM) is at version 2, with
-  a "What's new in v0.1.1" section; it says the video is shared separately.
+  The voiced MP4 is an asset of the v0.1.1 release (uploaded at the user's
+  request); the version without the voice stays in `video/m2/out/`. The
+  summary page (https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM) is at
+  version 3, with a "What's new in v0.1.1" section that links the video.
 - [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: Lambda's cloud
   image, data-center GPUs, multi-GPU NCCL. This is waiting for the user to
   provide a Lambda environment.
