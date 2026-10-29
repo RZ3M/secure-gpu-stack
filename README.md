@@ -117,7 +117,7 @@ and multi-GPU NCCL still need a Lambda instance; see
    git repository; otherwise it only catches corruption:
 
    ```bash
-   sha256sum -c SHA256SUMS && tar -xzf secure-gpu-stack-0.1.0.tar.gz && sudo secure-gpu-stack-0.1.0/install.sh
+   sha256sum -c SHA256SUMS && tar -xzf secure-gpu-stack-0.1.1.tar.gz && sudo secure-gpu-stack-0.1.1/install.sh
    ```
 
 3. Reboot if the installer says so, then check the machine:

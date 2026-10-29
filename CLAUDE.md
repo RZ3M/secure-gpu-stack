@@ -129,7 +129,9 @@ TensorFlow and JAX in the system Python. Options:
 ## Where things are (v0.1, branch `stack/v0.1`)
 
 - **On GitHub:** `RZ3M/secure-gpu-stack` (public since 2026-10-29). The v0.1.0 release holds
-  the walkthrough videos and the install tarball.
+  the walkthrough videos and the first install tarball. v0.1.1 (2026-10-29,
+  with the M2 fixes) is the current tarball; its SHA-256 is in the annotated
+  `v0.1.1` tag.
 - **Walkthrough video:** `video/` (see `video/README.md`).
 - **Goal and success criteria:** `README.md`.
 - **Findings about Lambda Stack, with evidence:** `docs/lambda-stack-findings.md`.

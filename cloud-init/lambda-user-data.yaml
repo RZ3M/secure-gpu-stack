@@ -15,7 +15,7 @@ write_files:
   - path: /root/sgs-release.env
     permissions: "0600"
     content: |
-      SGS_URL=https://REPLACE-ME/secure-gpu-stack-0.1.0.tar.gz
+      SGS_URL=https://REPLACE-ME/secure-gpu-stack-0.1.1.tar.gz
       SGS_SHA256=REPLACE-ME
       # Optional, for a signed release: the release's allowed_signers line
       # ("release@secure-gpu-stack ssh-ed25519 AAAA..."), taken from the git

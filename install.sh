@@ -23,7 +23,7 @@ set -euo pipefail
 # apt translates the output this script parses ("Candidate:", ...).
 export LC_ALL=C.UTF-8
 
-SGS_VERSION="0.1.0"
+SGS_VERSION="0.1.1"
 SGS_PREFIX="/opt/sgs"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

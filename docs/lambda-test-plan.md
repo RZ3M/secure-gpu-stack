@@ -70,13 +70,13 @@ image, as planned below.
 2. Copy it over:
 
    ```bash
-   scp dist/secure-gpu-stack-0.1.0.tar.gz dist/SHA256SUMS ubuntu@INSTANCE_B:
+   scp dist/secure-gpu-stack-0.1.1.tar.gz dist/SHA256SUMS ubuntu@INSTANCE_B:
    ```
 
 3. On the instance, verify the tarball and install:
 
    ```bash
-   sha256sum -c SHA256SUMS && tar -xzf secure-gpu-stack-0.1.0.tar.gz && sudo secure-gpu-stack-0.1.0/install.sh
+   sha256sum -c SHA256SUMS && tar -xzf secure-gpu-stack-0.1.1.tar.gz && sudo secure-gpu-stack-0.1.1/install.sh
    ```
 
 4. Reboot so the driver loads:
@@ -92,7 +92,7 @@ image, as planned below.
    ```
 
    ```bash
-   bash -l secure-gpu-stack-0.1.0/tests/user-checks.sh
+   bash -l secure-gpu-stack-0.1.1/tests/user-checks.sh
    ```
 
 6. From your computer, run the attack demo:
