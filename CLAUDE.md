@@ -128,6 +128,9 @@ TensorFlow and JAX in the system Python. Options:
 
 ## Where things are (v0.1, branch `stack/v0.1`)
 
+- **On GitHub:** `RZ3M/secure-gpu-stack` (private). The v0.1.0 release holds
+  the walkthrough videos and the install tarball.
+- **Walkthrough video:** `video/` (see `video/README.md`).
 - **Goal and success criteria:** `README.md`.
 - **Findings about Lambda Stack, with evidence:** `docs/lambda-stack-findings.md`.
 - **Design decisions and trade-offs:** `docs/design.md`.
@@ -292,8 +295,13 @@ TensorFlow and JAX in the system Python. Options:
 - [x] **Hill-climbing ended here (2026-10-29), at the user's call.** 76
   findings over rounds 1–AA; the big wins were early (GPU device files,
   cloud metadata, user namespaces, lockdown). Remaining work is not more
-  rounds but real-Lambda validation (below). Nothing is committed yet
-  (branch `stack/v0.1`); commit on the user's OK.
+  rounds but real-Lambda validation (below). Committed on `stack/v0.1`;
+  commit further changes only on the user's OK.
+- [x] Walkthrough video (2026-10-29): `video/`, 8:50, narrated with
+  OpenRouter's HeyGen voice "noelle" (never macOS `say`). The MP4s are
+  assets of the v0.1.0 GitHub release, not tracked in git.
+- [x] Pushed to GitHub (2026-10-29): private repository
+  `RZ3M/secure-gpu-stack`, both branches, default branch `stack/v0.1`.
 - [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: the driver path
   on Turing or newer, PyTorch convolutions and NCCL with the separated CUDA 12
   libraries, Lambda's cloud image, performance. This is waiting for the user to
