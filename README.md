@@ -4,6 +4,15 @@ A drop-in alternative to Lambda Stack for people who rent GPUs on Lambda. It
 installs the same tools the same way, but every default is chosen for security,
 and a check command proves it.
 
+## Walkthrough
+
+- **Video** (8:50, narrated and captioned): what the stack is, how it differs
+  from Lambda Stack, what testing found and fixed, and what isn't proven yet.
+  Download it from the
+  [v0.1.0 release](https://github.com/RZ3M/secure-gpu-stack/releases/tag/v0.1.0).
+  Its source is in [video/](video/).
+- **Summary page:** [Secure GPU Stack](https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM).
+
 ## Goal
 
 **Secure GPU Stack v0.1:** with one command on Ubuntu 24.04, a Lambda customer

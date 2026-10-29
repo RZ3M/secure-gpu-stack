@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Secure GPU Stack walkthrough</title>
+<style>
+:root {
+  --bg: #080B10;
+  --ink: #EAF0F5;
+  --soft: #C3CDD8;
+  --mute: #8794A5;
+  --dim: #4A5666;
+  --edge: #223042;
+  --line: #18212D;
+  --pass: #3DDC97;
+  --warn: #FFB020;
+  --bad: #FF5D5D;
+  --info: #5CC8FF;
+  --violet: #A991FF;
+  --sans: system-ui, "SF Pro Display", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --cond: "Avenir Next Condensed", "Avenir Next", system-ui, sans-serif;
+  --serif: ui-serif, "New York", Georgia, serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+#bg { position: absolute; inset: 0; background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1.2px, transparent 0); background-size: 34px 34px; }
+#vig { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0,0,0,.55) 100%); }
+#glow { position: absolute; width: 1600px; height: 1600px; border-radius: 50%; }
+#stage { position: absolute; inset: 0; }
+.scene { position: absolute; inset: 0; }
+.scene > * { position: absolute; }
+
+#hud { position: absolute; left: 120px; right: 120px; top: 52px; height: 30px; display: flex; justify-content: space-between; align-items: center; }
+#hud .wm { display: flex; align-items: center; gap: 14px; font: 700 17px/1 var(--sans); letter-spacing: .26em; color: var(--soft); }
+#hud .ch { font: 600 17px/1 var(--sans); letter-spacing: .2em; text-transform: uppercase; color: var(--soft); }
+#hud .ch b { font: 700 17px/1 var(--mono); color: var(--pass); letter-spacing: .06em; margin-right: 14px; }
+#cap { position: absolute; left: 0; right: 0; bottom: 58px; display: flex; justify-content: center; }
+#cap span { max-width: 1520px; text-align: center; font: 600 31px/1.36 var(--sans); color: #F4F7FA; background: rgba(6,9,13,.82); border: 1px solid #1C2633; padding: 12px 28px 14px; border-radius: 16px; }
+#prog { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: #0F151D; }
+#prog i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #2BB57B, var(--pass)); }
+#prog u { position: absolute; top: 0; bottom: 0; width: 2px; background: #2A3545; }
+
+.kicker { font: 700 19px/1 var(--sans); letter-spacing: .24em; text-transform: uppercase; color: var(--mute); }
+.h1 { font: 800 84px/1.04 var(--sans); letter-spacing: -.028em; }
+.h2 { font: 780 58px/1.08 var(--sans); letter-spacing: -.022em; }
+.lead { font: 500 30px/1.38 var(--sans); color: var(--soft); }
+.mono { font-family: var(--mono); }
+.big { font-family: var(--cond); font-weight: 800; line-height: .86; letter-spacing: -.01em; }
+.serif { font-family: var(--serif); }
+.mint { color: var(--pass); } .amber { color: var(--warn); } .red { color: var(--bad); } .blue { color: var(--info); } .mute { color: var(--mute); } .soft { color: var(--soft); }
+
+.card { background: linear-gradient(180deg, rgba(23,31,43,.94), rgba(14,20,29,.94)); border: 1px solid var(--edge); border-radius: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+.term { background: #0B1016; border: 1px solid #253244; border-radius: 18px; box-shadow: 0 30px 90px rgba(0,0,0,.55); overflow: hidden; }
+.term .bar { height: 46px; display: flex; align-items: center; gap: 10px; padding-left: 20px; border-bottom: 1px solid #1B2430; background: #0E141C; font: 500 17px/1 var(--mono); color: var(--mute); }
+.term .bar span { margin-left: 16px; }
+.term .d { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.d.r { background: #FF5F57; } .d.y { background: #FEBC2E; } .d.g { background: #28C840; }
+.term .tb { padding: 30px 40px; font-family: var(--mono); color: var(--ink); white-space: pre; }
+.pr { color: var(--pass); }
+
+.pill { display: inline-flex; align-items: center; font: 700 16px/1 var(--mono); letter-spacing: .08em; padding: 8px 12px 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.pill.high { color: #FF8A8A; background: rgba(255,93,93,.12); border-color: rgba(255,93,93,.45); }
+.pill.med { color: #FFC660; background: rgba(255,176,32,.10); border-color: rgba(255,176,32,.42); }
+.pill.ok { color: var(--pass); background: rgba(61,220,151,.10); border-color: rgba(61,220,151,.42); }
+.pill.info { color: var(--info); background: rgba(92,200,255,.10); border-color: rgba(92,200,255,.42); }
+.stamp { position: absolute; font: 900 25px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; padding: 11px 16px 9px; border: 4px solid; border-radius: 10px; white-space: nowrap; background: rgba(8,11,16,.6); }
+.stamp.ok { color: var(--pass); border-color: var(--pass); }
+.stamp.no { color: #FF7A7A; border-color: #FF7A7A; }
+.stamp.info { color: var(--info); border-color: var(--info); }
+.stamp.warn { color: var(--warn); border-color: var(--warn); }
+.xpill { font: 600 27px/1 var(--mono); color: #FF8A8A; padding: 17px 24px; border: 1.5px solid rgba(255,93,93,.5); border-radius: 14px; background: rgba(255,93,93,.08); white-space: nowrap; }
+
+.logo * { fill: none; stroke: var(--pass); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 1; }
+.logo .lg-pin { stroke: #2E9F70; }
+
+/* scene-specific */
+.chip { display: flex; align-items: center; justify-content: center; text-align: center; height: 96px; border-radius: 16px; border: 1px solid var(--edge); background: rgba(20,28,39,.9); font: 700 27px/1.1 var(--sans); }
+.row { display: flex; align-items: center; height: 58px; border-bottom: 1px solid var(--line); font: 500 27px/1 var(--sans); }
+.row .n { width: 76px; font: 600 21px/1 var(--mono); color: var(--dim); }
+.row .tx { flex: 1; }
+.tag { padding: 22px 26px; border-radius: 16px; border: 1.5px solid rgba(255,93,93,.45); background: rgba(255,93,93,.07); font: 650 27px/1.25 var(--sans); color: #FFB3B3; }
+.layer { height: 66px; border-radius: 14px; border: 1px solid var(--edge); background: linear-gradient(90deg, rgba(27,37,51,.96), rgba(17,24,34,.96)); display: flex; align-items: center; padding-left: 30px; font: 700 28px/1 var(--sans); overflow: hidden; }
+.layer::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 7px; background: var(--c); }
+.layer small { font: 600 17px/1 var(--mono); color: var(--mute); margin-left: 16px; letter-spacing: .04em; }
+.ann { display: flex; align-items: center; height: 66px; font: 500 26px/1.2 var(--sans); color: var(--soft); }
+.ann i { display: inline-block; width: 60px; height: 2px; background: #2B394C; margin-right: 22px; position: relative; flex: none; }
+.ann i::after { content: ""; position: absolute; right: -4px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--pass); }
+.ticket { height: 112px; border-radius: 16px; border: 1px solid var(--edge); background: rgba(19,26,37,.95); padding: 18px 26px; }
+.ticket .t1 { display: flex; align-items: center; gap: 16px; font: 700 27px/1.15 var(--sans); }
+.ticket .t2 { font: 500 21px/1.3 var(--sans); color: var(--mute); margin-top: 10px; }
+.node { width: 270px; height: 60px; margin-left: -135px; margin-top: -30px; border-radius: 999px; border: 1.5px solid #2A3A4E; background: #0F1620; display: flex; align-items: center; justify-content: center; gap: 12px; font: 650 24px/1 var(--sans); color: var(--soft); }
+.node b { font: 700 18px/1 var(--mono); color: var(--dim); }
+.claim { height: 98px; border-bottom: 1px solid var(--line); }
+.claim .q { font: 600 27px/1.2 var(--sans); }
+.claim .w { font: 500 21px/1.3 var(--sans); color: var(--mute); margin-top: 8px; }
+.ticks { display: flex; gap: 6px; height: 14px; }
+.ticks i { flex: 1; border-radius: 3px; background: #1E2836; }
+.tile { width: 540px; height: 300px; padding: 22px 28px; }
+.tile .tt { font: 750 30px/1 var(--sans); display: flex; align-items: center; gap: 14px; }
+.tile .k { font: 700 15px/1 var(--sans); letter-spacing: .22em; margin-top: 16px; }
+.tile .bf { font: 500 21px/1.3 var(--sans); color: var(--mute); margin-top: 7px; white-space: nowrap; }
+.tile .af { font: 600 22px/1.32 var(--sans); color: var(--ink); margin-top: 7px; }
+.tile .m { position: absolute; left: 28px; bottom: 20px; }
+.check { height: 92px; display: flex; align-items: center; gap: 28px; border-bottom: 1px solid var(--line); }
+.check .bx { width: 34px; height: 34px; border-radius: 8px; border: 3px solid var(--warn); flex: none; }
+.check .ct { font: 700 31px/1.15 var(--sans); }
+.check .cs { font: 500 21px/1.3 var(--sans); color: var(--mute); margin-top: 6px; }
+.habit { width: 820px; height: 170px; display: flex; gap: 26px; }
+.habit .num { width: 104px; font-family: var(--cond); font-weight: 800; font-size: 118px; line-height: .9; color: rgba(61,220,151,.75); text-align: right; flex: none; }
+.habit .ht { font: 750 36px/1.15 var(--sans); margin-top: 14px; }
+.habit .hs { font: 500 23px/1.35 var(--sans); color: var(--mute); margin-top: 10px; }
+.stat { height: 100px; padding: 18px 24px; border-radius: 16px; }
+.stat .a { font: 750 31px/1.1 var(--sans); }
+.stat .b { font: 500 19px/1.3 var(--sans); color: var(--mute); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="glow"></div>
+<div id="vig"></div>
+<div id="stage"></div>
+<div id="hud">
+  <div class="wm"><svg width="30" height="30" viewBox="0 0 200 200" class="logo" style="stroke-dasharray:none"><rect x="50" y="50" width="100" height="100" rx="16" style="stroke-dasharray:none;stroke-width:12"/><path style="stroke-dasharray:none;stroke-width:12" d="M100 70L125 80V100C125 116 114 126 100 131C86 126 75 116 75 100V80Z"/><path style="stroke-dasharray:none;stroke-width:10;stroke:#2E9F70" d="M66 50V28M100 50V28M134 50V28M66 150V172M100 150V172M134 150V172M50 66H28M50 100H28M50 134H28M150 66H172M150 100H172M150 134H172"/></svg>SECURE GPU STACK</div>
+  <div class="ch"><b></b><span></span></div>
+</div>
+<div id="cap"><span></span></div>
+<div id="prog"><i></i></div>
+
+<script src="script.js"></script>
+<script src="build/timeline.js"></script>
+<script>
+// ---------- toolkit: everything is a pure function of time t ----------
+const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
+const lerp = (a, b, p) => a + (b - a) * p;
+const E = {
+  lin: (p) => p,
+  out: (p) => 1 - Math.pow(1 - p, 3),
+  inOut: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+  back: (p) => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); },
+};
+// Progress of a tween that starts at t0 and lasts d.
+const P = (t, t0, d = 0.6, e = E.out) => e(clamp((t - t0) / d));
+// Visible from a, gone by b.
+const W = (t, a, b, fi = 0.55, fo = 0.45) => Math.min(P(t, a, fi), 1 - P(t, b, fo, E.inOut));
+function vis(el, p, { x = 0, y = 26, s = 1 } = {}) {
+  el.style.opacity = p;
+  el.style.transform = p >= 1 ? '' : `translate(${(1 - p) * x}px, ${(1 - p) * y}px) scale(${s + (1 - s) * p})`;
+}
+function stamp(el, p, rot = -7) {
+  el.style.opacity = clamp(p * 3);
+  el.style.transform = `rotate(${rot}deg) scale(${p <= 0 ? 1.8 : lerp(1.8, 1, E.back(p))})`;
+}
+const fmt = (n) => Math.round(n).toLocaleString('en-US');
+function h(html) { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; }
+// Place an element absolutely in a scene, hidden until a tween shows it.
+function A(root, x, y, html, w, show = false) {
+  const e = h(html);
+  e.style.position = 'absolute';
+  e.style.left = x + 'px';
+  e.style.top = y + 'px';
+  if (w) e.style.width = w + 'px';
+  e.style.opacity = show ? 1 : 0;
+  root.appendChild(e);
+  return e;
+}
+const LOGO = (size) => `<svg viewBox="0 0 200 200" width="${size}" height="${size}" class="logo">
+  <rect class="lg-body" x="50" y="50" width="100" height="100" rx="16" pathLength="1"/>
+  <path class="lg-pin" pathLength="1" d="M66 50V28M83 50V28M100 50V28M117 50V28M134 50V28M66 150V172M83 150V172M100 150V172M117 150V172M134 150V172M50 66H28M50 83H28M50 100H28M50 117H28M50 134H28M150 66H172M150 83H172M150 100H172M150 117H172M150 134H172"/>
+  <path class="lg-shield" pathLength="1" d="M100 70L125 80V100C125 116 114 126 100 131C86 126 75 116 75 100V80Z"/>
+  <path class="lg-check" pathLength="1" d="M88 101L97 110L113 92"/>
+</svg>`;
+function drawLogo(svg, t, t0) {
+  const parts = [['.lg-body', 0, 1.0], ['.lg-pin', 0.4, 1.0], ['.lg-shield', 0.8, 0.9], ['.lg-check', 1.4, 0.5]];
+  for (const [sel, d0, d] of parts) svg.querySelector(sel).style.strokeDashoffset = 1 - P(t, t0 + d0, d, E.inOut);
+}
+const head = (R, kicker, title, kc = '') => [
+  A(R, 120, 168, `<div class="kicker ${kc}">${kicker}</div>`),
+  A(R, 120, 204, `<div class="h2">${title}</div>`, 1680),
+];
+
+// ---------- scenes ----------
+const SCN = {};
+const def = (id, glow, build) => (SCN[id] = { glow, build });
+
+def('cold', [255, 93, 93], (R, S) => {
+  const T = A(R, 210, 330, `<div class="term" style="height:250px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>ubuntu@gpu-node: ~</span></div><div class="tb" style="font-size:30px"><span class="pr">$ </span><span class="c1"></span><span class="c2" style="border-radius:6px"></span><span class="cur" style="background:var(--ink)"> </span></div></div>`, 1500);
+  const c1 = T.querySelector('.c1'), c2 = T.querySelector('.c2'), cur = T.querySelector('.cur');
+  const s1 = 'wget -nv -O- https://lambdalabs.com/install-lambda-stack.sh ', s2 = '| sh -';
+  const anno = A(R, 1010, 600, `<div class="mono red" style="font-size:24px;text-align:right">↑ piped into a shell · it calls sudo · root</div>`, 700);
+  const kick = A(R, 0, 690, `<div class="kicker" style="text-align:center">Checked before it runs as root</div>`, 1920);
+  const row = A(R, 0, 738, `<div style="display:flex;gap:26px;justify-content:center"></div>`, 1920, true);
+  const pills = ['no checksum', 'no signature', 'dpkg -i: no signature check'].map((x) => { const p = h(`<div class="xpill">✗ ${x}</div>`); row.appendChild(p); p.style.opacity = 0; return p; });
+  return (t) => {
+    vis(T, P(t, 0.1, 0.6));
+    const n = s1.length + s2.length, k = Math.round(n * P(t, 0.5, 2.7, E.lin));
+    c1.textContent = s1.slice(0, Math.min(k, s1.length));
+    c2.textContent = k > s1.length ? s2.slice(0, k - s1.length) : '';
+    cur.style.opacity = (t > 0.5 && t < 3.3) || Math.floor(t * 1.8) % 2 === 0 ? 1 : 0;
+    const hp = P(t, S.L[1] + 0.9, 0.5);
+    c2.style.background = `rgba(255,93,93,${0.22 * hp})`;
+    c2.style.boxShadow = `0 0 0 4px rgba(255,93,93,${0.9 * hp})`;
+    c2.style.color = hp > 0.5 ? '#FFD0D0' : '';
+    vis(anno, P(t, S.L[1] + 1.4, 0.5), { y: -12 });
+    vis(kick, P(t, S.L[2] - 0.2, 0.5));
+    pills.forEach((p, i) => vis(p, P(t, S.L[2] + 0.15 + i * 0.35, 0.45, E.back), { y: 18 }));
+  };
+});
+
+def('title', [61, 220, 151], (R, S) => {
+  const L = A(R, 850, 170, `<div>${LOGO(220)}</div>`, 220, true);
+  const svg = L.querySelector('svg');
+  const ttl = A(R, 0, 440, `<div style="text-align:center;font:800 132px/1 var(--sans);letter-spacing:-.035em">Secure GPU Stack</div>`, 1920);
+  const sub = A(R, 0, 616, `<div style="display:flex;justify-content:center;gap:34px;font:600 38px/1 var(--sans);color:var(--soft)"><span>The same tools as Lambda Stack</span><span class="mint">·</span><span>Safe defaults</span><span class="mint">·</span><span>Proof</span></div>`, 1920, true);
+  const parts = [...sub.children];
+  const foot = A(R, 0, 720, `<div class="mono" style="text-align:center;font-size:22px;color:var(--mute);letter-spacing:.04em">v0.1 · what I built, what I tested, and how I worked</div>`, 1920);
+  return (t) => {
+    drawLogo(svg, t, 0.15);
+    svg.style.filter = `drop-shadow(0 0 ${24 * P(t, 1.6, 1)}px rgba(61,220,151,.45))`;
+    vis(ttl, P(t, S.L[0] - 0.1, 0.8), { y: 30 });
+    const at = [0, 0.4, 1.4, 1.9, 2.9];
+    parts.forEach((p, i) => vis(p, P(t, S.L[1] + at[i], 0.5), { y: 14 }));
+    vis(foot, P(t, S.E[1] - 0.6, 0.6));
+  };
+});
+
+def('brief', [92, 200, 255], (R, S) => {
+  const endA = S.L[4] - 0.3;
+  const k1 = A(R, 120, 196, `<div class="kicker">The challenge</div>`);
+  const h1 = A(R, 120, 240, `<div class="h1">An alternative to Lambda Stack, <span class="mint">with security built&nbsp;in.</span></div>`, 860);
+  const k2 = A(R, 1060, 196, `<div class="kicker">Lambda Stack, in one install</div>`);
+  const names = ['NVIDIA driver', 'CUDA', 'cuDNN', 'NCCL', 'PyTorch', 'TensorFlow', 'JAX', 'JupyterLab', 'Docker'];
+  const chips = names.map((n, i) => A(R, 1060 + (i % 3) * 252, 240 + Math.floor(i / 3) * 112, `<div class="chip">${n}</div>`, 236));
+  const k3 = A(R, 1060, 590, `<div class="mono mute" style="font-size:21px">Ubuntu · one script · updates through apt</div>`);
+  const planA = A(R, 120, 560, `<div class="card" style="height:132px;padding:26px 32px"><div class="kicker">Plan A</div><div style="font:700 36px/1.2 var(--sans);margin-top:14px;position:relative;display:inline-block">A locked-down, inference-only appliance<i class="strike" style="position:absolute;left:-6px;top:52%;height:5px;border-radius:3px;background:var(--bad);width:0"></i></div></div>`, 860);
+  const strike = planA.querySelector('.strike');
+  const fb = A(R, 120, 716, `<div class="card" style="height:132px;padding:26px 32px;border-color:rgba(255,176,32,.55)"><div class="kicker amber">Feedback</div><div style="font:600 32px/1.25 var(--sans);margin-top:14px">“Make it similar to Lambda Stack — an alternative to it.”</div></div>`, 860);
+  const [qk, qh] = head(R, 'Before any code', 'The questions that change the design');
+  const Q = [
+    ['Who uses it?', 'People already renting GPUs on Lambda'],
+    ["What's in it?", 'Everything Lambda Stack has'],
+    ['How does it ship?', 'The same way: one command'],
+    ['How strict can defaults be?', 'An SSH tunnel to Jupyter is fine'],
+  ];
+  const cards = Q.map(([q, a], i) => A(R, 120 + (i % 2) * 880, 336 + Math.floor(i / 2) * 272,
+    `<div class="card" style="height:246px;padding:34px 40px"><div class="mono mint" style="font-size:22px;font-weight:700">Q${i + 1}</div><div style="font:750 44px/1.1 var(--sans);margin-top:16px">${q}</div><div class="ans" style="display:flex;align-items:center;gap:16px;margin-top:26px;font:600 32px/1.2 var(--sans);color:var(--soft)"><span class="mint" style="font-size:34px">✓</span>${a}</div></div>`, 800));
+  const ans = cards.map((c) => c.querySelector('.ans'));
+  return (t) => {
+    vis(k1, W(t, 0.1, endA)); vis(h1, W(t, 0.25, endA), { y: 34 });
+    vis(k2, W(t, S.L[1] - 0.3, endA));
+    const step = (S.E[1] - S.L[1]) / 10;
+    chips.forEach((c, i) => vis(c, W(t, S.L[1] + i * step, endA, 0.45), { y: 20, s: 0.94 }));
+    vis(k3, W(t, S.E[1] - 0.6, endA));
+    vis(planA, W(t, S.L[2], endA));
+    strike.style.width = `calc(${100 * P(t, S.L[3] - 0.1, 0.7, E.inOut)}% + 12px)`;
+    if (P(t, S.L[3] - 0.1, 0.01) === 0) strike.style.width = '0';
+    planA.style.filter = `saturate(${1 - 0.8 * P(t, S.L[3], 0.6)})`;
+    planA.style.opacity = Math.min(+planA.style.opacity, 1 - 0.45 * P(t, S.L[3] + 0.3, 0.6));
+    vis(fb, W(t, S.L[3] + 0.5, endA));
+    vis(qk, P(t, S.L[4] + 0.1)); vis(qh, P(t, S.L[4] + 0.2), { y: 30 });
+    cards.forEach((c, i) => vis(c, P(t, S.L[4] + 0.6 + i * 0.25, 0.6), { y: 30 }));
+    const ansAt = [S.w(5, 'People'), S.w(6, 'Everything'), S.w(7, 'The same way'), S.L[8] + 0.6];
+    ans.forEach((a, i) => vis(a, P(t, ansAt[i], 0.5), { x: -16, y: 0 }));
+  };
+});
+
+def('audit', [255, 93, 93], (R, S) => {
+  const endA = S.L[1] - 0.3, endB = S.L[4] - 0.3;
+  const [ak, ah] = head(R, 'Case file', 'Lambda Stack, audited');
+  const meta = A(R, 1200, 228, `<div class="mono mute" style="font-size:22px;text-align:right">14 findings · evidence · repro steps</div>`, 600);
+  const F = [
+    ['01', "Lambda's apt pin blocks Ubuntu's NVIDIA driver security updates", 'high'],
+    ['02', 'Default driver branch (R570) is end of life', 'high'],
+    ['03', 'ML packages months stale, with known code-execution CVEs', 'high'],
+    ['04', 'NVIDIA Container Toolkit predates a High-rated CVE fix', 'high'],
+    ['05', 'Package repository is HTTP-only; its metadata never expires', 'med'],
+    ['06', 'One signing key is trusted for every repository on the machine', 'med'],
+    ['07', 'The install chain verifies nothing before running as root', 'med'],
+    ['09', "Ubuntu's user-namespace restriction, bypassable with aa-exec", 'med'],
+    ['13', 'Cloud metadata reachable by every user and container', 'med'],
+  ];
+  const rows = F.map(([n, tx, sv], i) => A(R, 120, 320 + i * 58, `<div class="row"><span class="n">${n}</span><span class="tx">${tx}</span><span class="pill ${sv}">${sv === 'high' ? 'HIGH' : 'MEDIUM'}</span></div>`, 1680));
+  const more = A(R, 196, 856, `<div class="mute" style="font-size:22px">+ io_uring open to all · line disciplines · X11 forwarding · kernel lockdown off · a flash-attn CVE</div>`, 1600);
+  // B: the pin
+  const [bk, bh] = head(R, 'Finding 01', 'The pin that outranks security updates', 'red');
+  const track = A(R, 200, 320, `<div style="width:14px;height:540px;border-radius:7px;background:#16202C;overflow:hidden"><i style="position:absolute;left:0;right:0;bottom:0;background:linear-gradient(0deg,#2a3a4e,#FF5D5D);border-radius:7px"></i></div>`, 14, true);
+  const fill = track.querySelector('i');
+  const yOf = (v) => 320 + 540 - (540 * v) / 1100;
+  const m1 = A(R, 186, yOf(1001) - 21, `<div style="display:flex;align-items:center;gap:22px"><i style="width:42px;height:4px;background:var(--bad);border-radius:2px"></i><span class="big red" style="font-size:64px">1001</span><span style="font:600 26px/1.25 var(--sans);color:#FFB3B3;width:520px">Lambda's pin: wins every time, even when that's a downgrade</span></div>`, 900);
+  const m2 = A(R, 186, yOf(500) - 21, `<div style="display:flex;align-items:center;gap:22px"><i style="width:42px;height:4px;background:var(--mute);border-radius:2px"></i><span class="big soft" style="font-size:64px">500</span><span style="font:600 26px/1.25 var(--sans);color:var(--soft);width:520px">Ubuntu's archive, including noble-security</span></div>`, 900);
+  const cardOk = A(R, 1000, 320, `<div class="card" style="height:200px;padding:26px 34px;border-color:rgba(61,220,151,.45)"><div class="kicker mint">Available · Ubuntu noble-security</div><div class="mono" style="font:700 62px/1 var(--mono);margin-top:18px">580.178.04</div><div class="soft" style="font-size:23px;margin-top:16px">This year's NVIDIA security fixes, e.g. CVE-2026-24187 (CVSS 8.8)</div></div>`, 800);
+  const cardBad = A(R, 1000, 544, `<div class="card" style="height:200px;padding:26px 34px;border-color:rgba(255,93,93,.5)"><div class="kicker red">Installed · held by the pin</div><div class="mono" style="font:700 62px/1 var(--mono);margin-top:18px">580.105.08</div><div class="soft" style="font-size:23px;margin-top:16px">Older than all three 2026 R580 security releases</div></div>`, 800);
+  const apt = A(R, 1000, 776, `<div class="mono" style="font-size:28px"><span class="pr">$</span> sudo apt upgrade <span class="red">→ stays on 580.105.08</span></div>`, 800);
+  // C: stale
+  const [ck, ch] = head(R, 'Findings 02 · 03', 'End of life, and known to be vulnerable', 'red');
+  const r570 = A(R, 120, 318, `<div class="big" style="font-size:230px;color:#D9E1E9">R570</div>`, 760);
+  const eol = A(R, 500, 478, `<div class="stamp no" style="position:static;font-size:30px">End of life</div>`);
+  const r570s = A(R, 120, 560, `<div class="soft" style="font-size:24px;line-height:1.4">Lambda's default branch. NVIDIA's support table lists only R535 (to June 2026), R580 LTS (to 2028), R595 and R610.</div>`, 760);
+  const n44 = A(R, 980, 318, `<div class="big amber" style="font-size:230px">0</div>`, 300);
+  const n44l = A(R, 1270, 350, `<div style="font:700 38px/1.2 var(--sans)">known vulnerability advisories in the ML packages</div>`, 530);
+  const chips = A(R, 980, 560, `<div style="display:flex;gap:14px"><span class="pill med" style="font-size:20px">KERAS 28</span><span class="pill med" style="font-size:20px">PYTORCH 15</span><span class="pill med" style="font-size:20px">FSSPEC 1</span></div>`, 820);
+  const chipsS = A(R, 980, 614, `<div class="soft" style="font-size:24px;line-height:1.4">Keras 3.10: code execution when loading a model, even with safe_mode=True</div>`, 820);
+  const tags = ['HTTP only, and the signed metadata never expires', 'One key trusted for every repository', 'The install verifies nothing, then runs as root'].map((x, i) => A(R, 120 + i * 566, 724, `<div class="tag" style="height:130px">${x}</div>`, 540));
+  return (t) => {
+    vis(ak, W(t, 0.1, endA)); vis(ah, W(t, 0.2, endA), { y: 30 }); vis(meta, W(t, 0.6, endA));
+    const st = (S.E[0] - S.L[0] - 0.6) / F.length;
+    rows.forEach((r, i) => vis(r, W(t, S.L[0] + 0.3 + i * st, endA, 0.4), { x: -24, y: 0 }));
+    vis(more, W(t, S.E[0] - 0.2, endA));
+    vis(bk, W(t, S.L[1], endB)); vis(bh, W(t, S.L[1] + 0.1, endB), { y: 30 });
+    const tp = W(t, S.L[1] + 0.2, endB); track.style.opacity = tp;
+    fill.style.height = `${(100 * 1001 / 1100) * P(t, S.L[1] + 0.4, 1.6, E.inOut)}%`;
+    vis(m2, W(t, S.L[1] + 0.9, endB), { x: -20, y: 0 });
+    vis(m1, W(t, S.w(1, 'at priority'), endB), { x: -20, y: 0 });
+    vis(cardOk, W(t, S.L[2] + 0.2, endB), { x: 30, y: 0 });
+    vis(cardBad, W(t, S.L[3] + 0.2, endB), { x: 30, y: 0 });
+    vis(apt, W(t, S.w(3, 'apt upgrade'), endB));
+    vis(ck, P(t, S.L[4])); vis(ch, P(t, S.L[4] + 0.1), { y: 30 });
+    vis(r570, P(t, S.L[4] + 0.3), { y: 30 });
+    stamp(eol, P(t, S.L[4] + 1.0, 0.45));
+    vis(r570s, P(t, S.L[4] + 1.4));
+    vis(n44, P(t, S.L[5] - 0.1), { y: 30 });
+    n44.textContent = fmt(44 * P(t, S.L[5], 1.6, E.out));
+    vis(n44l, P(t, S.L[5] + 0.3), { x: 20, y: 0 });
+    vis(chips, P(t, S.w(5, 'known'))); vis(chipsS, P(t, S.w(5, 'some of them')));
+    vis(tags[0], P(t, S.L[6] + 0.2, 0.5, E.back), { y: 24 });
+    vis(tags[1], P(t, S.w(6, 'One key'), 0.5, E.back), { y: 24 });
+    vis(tags[2], P(t, S.L[7] + 0.2, 0.5, E.back), { y: 24 });
+  };
+});
+
+def('rules', [61, 220, 151], (R, S) => {
+  const [k, hh] = head(R, 'Design rules', 'Same tools. Safe defaults. Proof.');
+  const icons = [
+    `<svg width="76" height="76" viewBox="0 0 76 76" fill="none" stroke="#3DDC97" stroke-width="4" stroke-linejoin="round"><rect x="6" y="14" width="40" height="40" rx="9"/><rect x="30" y="22" width="40" height="40" rx="9" stroke="#5CC8FF"/></svg>`,
+    `<svg width="76" height="76" viewBox="0 0 76 76" fill="none" stroke="#3DDC97" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M38 6L64 16V36C64 53 52 64 38 70C24 64 12 53 12 36V16Z"/><path d="M27 38L35 46L50 30"/></svg>`,
+    `<svg width="76" height="76" viewBox="0 0 76 76" fill="none" stroke="#3DDC97" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><rect x="5" y="10" width="66" height="56" rx="9"/><path d="M17 30L26 38L17 46"/><path d="M33 47H52" stroke="#5CC8FF"/></svg>`,
+  ];
+  const C = [
+    ['Same experience', 'Same tools, close versions, one install. If code runs on Lambda Stack, it runs here.', 'PyTorch · TensorFlow · JAX · Jupyter · Docker'],
+    ['Safe defaults', 'Nothing reachable but SSH. Least privilege. Patches that actually arrive.', 'firewall · no docker group · timed updates'],
+    ['Proof', 'sgs-check shows the difference on any machine, and re-runs every day.', 'PASS or WARN, always with the reason'],
+  ];
+  const cards = C.map(([a, b, c], i) => A(R, 120 + i * 570, 326, `<div class="card" style="height:520px;padding:46px 44px">${icons[i]}<div style="font:800 48px/1.1 var(--sans);margin-top:34px">${a}</div><div class="soft" style="font:500 29px/1.4 var(--sans);margin-top:22px">${b}</div><div class="mono mute" style="position:absolute;left:44px;right:20px;bottom:40px;font-size:16px">${c}</div></div>`, 540));
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    cards.forEach((c, i) => vis(c, P(t, S.L[i + 1] - 0.1, 0.7), { y: 60 }));
+  };
+});
+
+def('build', [92, 200, 255], (R, S) => {
+  const k = A(R, 150, 162, `<div class="kicker">What install.sh builds</div>`);
+  const Ls = [
+    ['Ubuntu 24.04', 'base', '#E95420', 'Firewall (SSH only) · keys-only SSH · kernel pins · auditd'],
+    ['NVIDIA R580 LTS driver', 'ubuntu archive', '#76B900', "From Ubuntu's archive, so security fixes keep flowing"],
+    ['CUDA · cuDNN · NCCL', 'nvidia repo', '#4FBF7A', 'HTTPS, and one pinned key per source'],
+    ['Docker + Container Toolkit', 'gpu containers', '#2496ED', 'No docker group · published ports stay on localhost'],
+    ['/opt/sgs', 'isolated python', '#FFD43B', 'Read-only · hash-locked · wheels only'],
+    ['PyTorch · TensorFlow · JAX', 'frameworks', '#EE4C2C', 'Current versions · 0 known advisories'],
+    ['JupyterLab', 'notebooks', '#F37626', 'Private Unix socket · systemd sandbox'],
+  ];
+  const yL = (i) => 788 - i * 80;
+  const layers = Ls.map(([n, s, c], i) => A(R, 150, yL(i), `<div class="layer" style="--c:${c};position:relative">${n}<small>${s}</small><span class="ok mint" style="position:absolute;right:26px;font-size:30px;opacity:0">✓</span></div>`, 820));
+  const oks = layers.map((l) => l.querySelector('.ok'));
+  const anns = Ls.map(([, , , a], i) => A(R, 990, yL(i), `<div class="ann"><i></i>${a}</div>`, 830));
+  const sgs = A(R, 150, 212, `<div class="layer" style="--c:var(--pass);position:relative;height:70px;border-color:rgba(61,220,151,.6);background:linear-gradient(90deg,rgba(20,58,45,.95),rgba(14,30,26,.95));box-shadow:0 0 40px rgba(61,220,151,.18)"><span class="mono">sgs-check</span><small>the proof</small></div>`, 820);
+  const sgsAnn = A(R, 990, 214, `<div class="ann" style="color:var(--pass)"><i></i>Audits every layer, daily, and shows it at login</div>`, 830);
+  const beam = A(R, 150, 0, `<div style="height:3px;background:var(--pass);box-shadow:0 0 18px 4px rgba(61,220,151,.55);border-radius:2px"></div>`, 820);
+  const at = [S.L[1], S.L[2], S.L[3], S.L[4], S.L[5], S.L[5] + 2.2, S.L[6]];
+  const [shk] = [A(R, 1070, 330, `<div class="kicker mint">Ships as</div>`)];
+  const ships = [
+    ['One command', 'install.sh, on any Ubuntu 24.04 GPU machine'],
+    ['A checksum and a signature', 'SHA-256, signed with ssh-keygen'],
+    ['A cloud-init wrapper', "Lambda's first boot runs it, after verifying it"],
+    ['An SBOM', 'CycloneDX list of every package, plus a pinned manifest'],
+  ].map(([a, b], i) => A(R, 1070, 380 + i * 112, `<div><div style="font:750 32px/1.1 var(--sans)">${a}</div><div class="soft" style="font-size:23px;margin-top:8px">${b}</div></div>`, 740));
+  return (t) => {
+    vis(k, P(t, 0.1));
+    const annEnd = S.L[8] - 0.3;
+    layers.forEach((l, i) => vis(l, P(t, at[i] - 0.1, 0.6), { y: 40 }));
+    anns.forEach((a, i) => vis(a, W(t, at[i] + 0.35, annEnd), { x: -20, y: 0 }));
+    vis(sgs, P(t, S.L[7] - 0.1, 0.6), { y: -30 });
+    vis(sgsAnn, W(t, S.L[7] + 0.3, annEnd), { x: -20, y: 0 });
+    const b0 = S.L[7] + 0.5;
+    if (t > b0) {
+      const ph = ((t - b0) / 2.4) % 1;
+      const y = lerp(860, 214, E.inOut(ph));
+      beam.style.top = y + 'px';
+      beam.style.opacity = Math.sin(Math.PI * ph) * 0.95;
+      oks.forEach((o, i) => { const ly = yL(i) + 33; const first = b0 + 2.4 * (860 - ly) / (860 - 214); o.style.opacity = P(t, first, 0.3); });
+    } else { beam.style.opacity = 0; oks.forEach((o) => (o.style.opacity = 0)); }
+    vis(shk, P(t, S.L[8] + 0.1));
+    const shipAt = ['one verifiable', 'a checksum', 'a cloud-init', 'an SBOM'].map((w) => S.w(8, w));
+    ships.forEach((s, i) => vis(s, P(t, shipAt[i] - 0.1, 0.6), { x: 30, y: 0 }));
+  };
+});
+
+def('bench', [169, 145, 255], (R, S) => {
+  const [k, hh] = head(R, 'Where it was tested', 'Three places, each harder than the last');
+  const meter = (n) => `<div style="position:absolute;left:40px;right:40px;bottom:36px"><div class="kicker" style="font-size:15px">Realism</div><div style="display:flex;gap:8px;margin-top:12px">${[0, 1, 2].map((i) => `<i style="flex:1;height:10px;border-radius:5px;background:${i < n ? 'var(--violet)' : '#1E2836'}"></i>`).join('')}</div></div>`;
+  const li = (x) => `<div class="li" style="display:flex;gap:14px;font:500 27px/1.3 var(--sans);color:var(--soft);margin-top:16px"><span style="color:var(--violet)">—</span><span>${x}</span></div>`;
+  const c1 = A(R, 120, 322, `<div class="card" style="height:540px;padding:40px"><div class="mono mute" style="font-size:18px;letter-spacing:.06em">MULTIPASS · ARM64 · NO GPU</div><div style="font:800 54px/1 var(--sans);margin-top:18px">Local VMs</div><div style="margin-top:20px">${li("Lambda's repository and packages vs. Secure GPU Stack")}${li('The same check on both')}${li('Fresh installs and reboots')}</div>${meter(1)}</div>`, 540);
+  const c2 = A(R, 690, 322, `<div class="card" style="height:540px;padding:40px;border-color:rgba(61,220,151,.55);box-shadow:0 0 60px rgba(61,220,151,.12),0 24px 70px rgba(0,0,0,.45)"><div class="mono mute" style="font-size:18px;letter-spacing:.06em">X86-64 · GTX 1070 · UBUNTU 24.04</div><div style="font:800 54px/1 var(--sans);margin-top:18px">krabs <span class="soft" style="font:500 28px var(--sans)">my own laptop</span></div><div style="margin-top:20px">${li('198 days of uptime')}${li('Docker Desktop, a media server')}${li("Ubuntu's old CUDA 12.0")}</div><div class="note mint" style="font:650 23px/1.3 var(--sans);margin-top:22px">Messier than a fresh cloud image, on purpose</div>${meter(2)}</div>`, 540);
+  const c3 = A(R, 1260, 322, `<div class="card" style="height:540px;padding:40px;border-style:dashed;border-color:#3A4A60"><div class="mono mute" style="font-size:18px;letter-spacing:.06em">LAMBDA CLOUD</div><div style="font:800 54px/1 var(--sans);margin-top:18px">A real instance</div><div style="margin-top:20px">${li('A current data-center GPU')}${li("Lambda's own image")}${li('Test plan written')}</div><div class="stamp warn" style="right:40px;bottom:104px;font-size:22px;transform:rotate(-6deg)">Next</div>${meter(3)}</div>`, 540);
+  const c2li = [...c2.querySelectorAll('.li')], note = c2.querySelector('.note');
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    vis(c1, P(t, S.L[1] - 0.1, 0.7), { y: 50 });
+    vis(c2, P(t, S.L[2] - 0.1, 0.7), { y: 50 });
+    const liAt = ['198', 'Docker', 'an old CUDA'].map((w) => S.w(3, w));
+    c2li.forEach((l, i) => vis(l, P(t, liAt[i] - 0.1, 0.5), { x: -14, y: 0 }));
+    vis(note, P(t, S.L[4] + 0.3, 0.5));
+    vis(c3, P(t, S.L[5] - 0.1, 0.7), { y: 50 });
+  };
+});
+
+def('broke', [255, 176, 32], (R, S) => {
+  const n = A(R, 120, 236, `<div class="big amber" style="font-size:360px">0</div>`, 560);
+  const nl = A(R, 124, 580, `<div style="font:800 44px/1.15 var(--sans)">problems the VMs couldn't find</div>`, 560);
+  const ns = A(R, 124, 704, `<div class="soft" style="font-size:25px;line-height:1.4">installer bugs · stack bugs · blind spots in my own check</div>`, 560);
+  const T = [
+    ['INSTALLER', 'Dead GPU after a reboot on HWE kernels', 'Driver modules were picked for the wrong kernel line'],
+    ['STACK', 'TensorFlow silently ran on the CPU', "Its cuSOLVER library wasn't on its search path"],
+    ['STACK', "PyTorch's cuDNN and NCCL replaced by TensorFlow's", '70 shared files · every download hash-checked · pip check: “No broken requirements”'],
+    ['MY CHECK', '“Updates are on”: nothing installed in 99 days', 'A hung apt job had held the lock since July 21'],
+    ['MY CHECK', "The GPU test passed; JAX couldn't compute", 'Now each framework runs a real matrix multiply, CPU fallback off'],
+  ];
+  const tk = T.map(([g, a, b], i) => A(R, 760, 228 + i * 128, `<div class="ticket" style="position:relative"><div class="t1"><span class="pill ${g === 'MY CHECK' ? 'med' : g === 'STACK' ? 'info' : 'high'}">${g}</span>${a}</div><div class="t2">${b}</div><div class="stamp ok" style="right:24px;top:30px;font-size:20px">Fixed</div></div>`, 1040));
+  const st = tk.map((x) => x.querySelector('.stamp'));
+  const lk = A(R, 0, 372, `<div class="kicker amber" style="text-align:center">The lesson</div>`, 1920);
+  const lq = A(R, 160, 420, `<div class="serif" style="text-align:center;font:italic 500 84px/1.2 var(--serif)">A check that can't fail<br>is worse than no check.</div>`, 1600);
+  return (t) => {
+    const dimP = P(t, S.L[6] - 0.2, 0.7, E.inOut), keep = 1 - 0.96 * dimP;
+    vis(n, P(t, 0.1, 0.6)); n.style.opacity *= keep;
+    n.textContent = fmt(15 * P(t, 0.3, Math.max(1, S.E[0] - 0.5), E.out));
+    vis(nl, P(t, 0.9)); nl.style.opacity *= keep;
+    vis(ns, P(t, S.E[0] - 0.4)); ns.style.opacity *= keep;
+    const at = [S.L[1], S.L[2], S.L[3], S.L[4], S.L[5]];
+    tk.forEach((x, i) => { vis(x, P(t, at[i] - 0.05, 0.55), { x: 40, y: 0 }); x.style.opacity *= keep; });
+    st.forEach((s, i) => stamp(s, P(t, at[i] + 1.3, 0.4), -6));
+    vis(lk, P(t, S.L[6] + 0.1, 0.6)); vis(lq, P(t, S.L[6] + 0.3, 0.9), { y: 30 });
+  };
+});
+
+def('loop', [61, 220, 151], (R, S) => {
+  const cx = 600, cy = 566, r = 252;
+  const ring = A(R, 0, 0, `<svg width="1920" height="1080" style="position:absolute;left:0;top:0"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#1E2A39" stroke-width="3"/><circle class="arc" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3DDC97" stroke-width="4" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" transform="rotate(-90 ${cx} ${cy})" stroke-linecap="round"/><circle class="dot" r="9" fill="#3DDC97"/></svg>`, 1920);
+  const arc = ring.querySelector('.arc'), dot = ring.querySelector('.dot');
+  const names = ['Hypothesis', 'Attack it, or plant it', 'Fix', 'Negative control', 'Independent review'];
+  const nodes = names.map((nm, i) => { const a = (-90 + i * 72) * Math.PI / 180; return A(R, cx + r * Math.cos(a), cy + r * Math.sin(a), `<div class="node"><b>${i + 1}</b>${nm}</div>`); });
+  const ctr1 = A(R, cx - 200, cy - 30, `<div class="kicker" style="text-align:center">every round</div>`, 400);
+  const ctr2 = A(R, cx - 200, cy - 112, `<div style="text-align:center"><div class="big mint" style="font-size:170px">76</div><div style="font:750 32px/1 var(--sans);margin-top:10px">findings</div><div class="mute" style="font-size:19px;margin-top:12px;line-height:1.35">fixed or disproved<br>on a real machine</div></div>`, 400);
+  const tick = (i) => [S.L[1], S.w(1, 'Attack'), S.L[2], S.w(2, 'Then prove'), S.L[3]][i];
+  const rv = A(R, 1040, 236, `<div class="kicker">Independent reviewers</div>`);
+  const RV = [['Fresh code review', 'no prior context'], ['DeepSeek V4.1 Flash', 'open-weight · read-only · no tools'], ['GLM 5.3 Flash', 'open-weight · read-only · no tools']];
+  const rvs = RV.map(([a, b], i) => A(R, 1040, 284 + i * 104, `<div style="display:flex;align-items:center;gap:22px;height:88px"><div style="width:60px;height:60px;border-radius:16px;border:1.5px solid #2E3E52;display:flex;align-items:center;justify-content:center;font:700 24px var(--mono);color:var(--info)">${'CDG'[i]}</div><div><div style="font:750 32px/1.1 var(--sans)">${a}</div><div class="mute mono" style="font-size:19px;margin-top:8px">${b}</div></div></div>`, 760));
+  const rule = A(R, 1040, 610, `<div class="amber" style="font:650 25px/1.35 var(--sans)">Every finding untrusted until it's reproduced on krabs or a VM</div>`, 760);
+  const endR = S.L[4] - 0.3;
+  const ck = A(R, 1040, 236, `<div class="kicker">Claims, tested</div>`);
+  const CL = [['“Audit watches aren\'t recursive”', 'Planted edits were recorded'], ['“The NVIDIA driver pin does nothing”', "apt picks Ubuntu's 580.178.04"], ['“sgs-check never finds Jupyter”', "krabs's run shows those checks passing"]];
+  const cls = CL.map(([a, b], i) => A(R, 1040, 276 + i * 104, `<div class="claim" style="position:relative"><div class="q">${a}</div><div class="w">${b}</div><div class="stamp no" style="right:0;top:18px;font-size:18px">Rejected</div></div>`, 760));
+  const clSt = cls.map((c) => c.querySelector('.stamp'));
+  const conf = A(R, 1040, 612, `<div class="card" style="height:222px;padding:26px 30px;border-color:rgba(255,176,32,.6)"><div class="kicker amber">Right, and I'd dismissed it</div><div style="font:750 30px/1.2 var(--sans);margin-top:16px;width:560px">“Docker and NVIDIA updates never auto-install”</div><div class="why soft" style="font-size:22px;line-height:1.35;margin-top:14px">GLM, rounds A and B. My check had cut “NVIDIA CUDA” to “NVIDIA”.</div><div class="stamp ok" style="right:26px;top:22px;font-size:19px">Confirmed</div></div>`, 760);
+  const confSt = conf.querySelector('.stamp'), why = conf.querySelector('.why');
+  return (t) => {
+    ring.style.opacity = P(t, 0.1, 0.6);
+    arc.style.strokeDashoffset = 1 - P(t, 0.3, 2.2, E.inOut);
+    const a = (-90 + 360 * (((t - 0.3) / 6) % 1)) * Math.PI / 180;
+    dot.setAttribute('cx', cx + r * Math.cos(a)); dot.setAttribute('cy', cy + r * Math.sin(a));
+    dot.style.opacity = P(t, 2.3, 0.5);
+    nodes.forEach((nd, i) => {
+      vis(nd, P(t, 0.3 + i * 0.12, 0.5), { s: 0.8, y: 0 });
+      const on = P(t, tick(i), 0.4);
+      const c = nd;
+      c.style.borderColor = on > 0 ? `rgba(61,220,151,${0.35 + 0.65 * on})` : '';
+      c.style.background = on > 0 ? `linear-gradient(rgba(61,220,151,${0.14 * on}), rgba(61,220,151,${0.14 * on})), #0F1620` : '';
+      c.style.color = on > 0.5 ? 'var(--ink)' : '';
+      c.firstElementChild.style.color = on > 0.5 ? 'var(--pass)' : '';
+    });
+    vis(ctr1, W(t, 0.6, S.L[7] - 0.4));
+    vis(ctr2, P(t, S.L[7] + 0.1, 0.7), { s: 0.85, y: 0 });
+    if (t > S.L[7]) ctr2.querySelector('.big').textContent = fmt(76 * P(t, S.L[7] + 0.1, 1.6));
+    vis(rv, W(t, S.L[3] + 0.2, endR));
+    const rvAt = ['a fresh code review', 'DeepSeek', 'GLM'].map((w) => S.w(3, w));
+    rvs.forEach((x, i) => vis(x, W(t, rvAt[i] - 0.1, endR), { x: 30, y: 0 }));
+    vis(rule, W(t, S.E[3] - 0.6, endR));
+    vis(ck, P(t, S.L[4] + 0.1));
+    cls.forEach((c, i) => vis(c, P(t, S.L[4] + 0.3 + i * 1.0, 0.5), { x: 30, y: 0 }));
+    clSt.forEach((s, i) => stamp(s, P(t, S.L[4] + 0.9 + i * 1.0, 0.4), -6));
+    vis(conf, P(t, S.L[5] + 0.2, 0.6), { y: 40 });
+    stamp(confSt, P(t, S.w(5, 'right'), 0.4), -6);
+    vis(why, P(t, S.L[6], 0.5));
+  };
+});
+
+def('gpu', [255, 93, 93], (R, S) => {
+  const [k, hh] = head(R, 'Spotlight', 'Who can open the GPU?', 'red');
+  const files = ['nvidia0', 'nvidiactl', 'nvidia-uvm', 'nvidia-uvm-tools'];
+  const T = A(R, 120, 318, `<div class="term" style="height:288px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>krabs</span></div><div class="tb" style="font-size:26px;line-height:1.5;padding:22px 34px"><span class="pr">$</span> ls -l /dev/nvidia*\n${files.map((f) => `<span class="pm">crw-rw-<b>rw-</b></span>  root <span class="gr">root </span>  /dev/${f}`).join('\n')}</div></div>`, 800);
+  const pms = [...T.querySelectorAll('.pm')], grs = [...T.querySelectorAll('.gr')];
+  const lab1 = A(R, 120, 622, `<div class="red" style="font:650 25px/1.3 var(--sans)">0666: every account on the machine, service accounts included</div>`, 800);
+  const lab2 = A(R, 120, 622, `<div class="mint" style="font:650 25px/1.3 var(--sans)">0660: the video group only, created closed, locked</div>`, 800);
+  const fin = A(R, 120, 686, `<div style="display:flex;align-items:flex-end;gap:28px"><div class="big mint" style="font-size:190px">0</div><div style="padding-bottom:14px"><div style="font:800 44px/1.1 var(--sans)">opens in <span class="cnt">17,000,000</span> tries</div><div class="soft" style="font-size:22px;margin-top:10px">4 reboots · a driver reload · containers as root and uid 1000</div></div></div>`, 800);
+  const finCnt = fin.querySelector('.cnt');
+  const RW = [
+    ['Attempt 1', 'Re-apply the mode after every change', 'a systemd path unit', '20/20', 'runs: attacker got in', 'bad', 20],
+    ['Attempt 2', 'Lock: a read-only bind mount', 'chmod and chown fail; the GPU still opens', '0', 'in 2.9 million tries', 'ok', 40],
+    ['Found in review', 'Boot window: born 0666, locked 45 ms later', "Ubuntu's ub-device-create, at driver load", '10/10', 'creations: got in', 'bad', 10],
+    ['Attempt 3', 'Create them 0660 from the start', 'ub-device-create diverted', '0', 'in 14 million tries', 'ok', 40],
+  ];
+  const rows = RW.map(([a, b, c, big, l, kind, n], i) => A(R, 980, 318 + i * 140, `<div class="card" style="height:126px;padding:16px 26px;position:relative"><div class="mono" style="font-size:16px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase">${a}</div><div style="font:750 26px/1.15 var(--sans);margin-top:8px">${b}</div><div class="mute" style="font-size:19px;margin-top:6px">${c}</div><div style="position:absolute;right:26px;top:14px;text-align:right"><div class="big ${kind === 'ok' ? 'mint' : 'red'}" style="font-size:62px">${big}</div><div class="mute" style="font-size:16px;margin-top:4px;width:200px">${l}</div></div><div class="ticks" style="position:absolute;left:26px;right:250px;bottom:12px;height:6px">${'<i></i>'.repeat(n)}</div></div>`, 820));
+  const ticks = rows.map((r) => [...r.querySelectorAll('.ticks i')]);
+  const at = [S.L[1] + 0.2, S.w(2, 'So I locked'), S.L[3] + 0.2, S.L[4] + 0.1];
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    vis(T, P(t, 0.4, 0.6), { y: 30 });
+    const bad = P(t, S.w(0, 'open to every'), 0.4), good = P(t, S.L[5] + 0.1, 0.5);
+    pms.forEach((p) => {
+      const b = p.querySelector('b');
+      if (good > 0) { b.textContent = '---'; b.style.color = 'var(--pass)'; b.style.background = `rgba(61,220,151,${0.18 * good})`; }
+      else { b.textContent = 'rw-'; b.style.color = bad > 0.5 ? '#FF8A8A' : ''; b.style.background = `rgba(255,93,93,${0.2 * bad})`; }
+    });
+    grs.forEach((g) => { g.textContent = good > 0 ? 'video' : 'root '; g.style.color = good > 0 ? 'var(--pass)' : ''; });
+    vis(lab1, Math.min(P(t, S.w(0, 'open to every') + 0.4), 1 - good), { y: 10 });
+    vis(lab2, good, { y: 10 });
+    vis(fin, P(t, S.L[5] + 0.4, 0.7), { y: 30 });
+    finCnt.textContent = fmt(17000000 * P(t, S.L[5] + 0.5, 2.0, E.out));
+    rows.forEach((r, i) => vis(r, P(t, at[i] - 0.2, 0.55), { x: 40, y: 0 }));
+    ticks.forEach((tk, i) => {
+      const kind = RW[i][5];
+      tk.forEach((x, j) => {
+        if (kind === 'bad') { const on = P(t, at[i] + 0.4 + j * (1.6 / tk.length), 0.15); x.style.background = on > 0 ? `rgba(255,93,93,${0.25 + 0.75 * on})` : ''; }
+        else { const live = t > at[i] + 0.3; const ph = Math.floor((t - at[i]) * 24); x.style.background = live ? (((j * 7 + ph) % 11) === 0 ? '#3A4A5E' : '#223040') : ''; }
+      });
+    });
+  };
+});
+
+def('doors', [92, 200, 255], (R, S) => {
+  const [k, hh] = head(R, 'Same loop, many doors', 'Before and after, each one attacked again');
+  const D = [
+    ['Jupyter', 'localhost:8888: any account got HTTP 200', 'A private Unix socket (0600), reached through an SSH tunnel', 'sandbox exposure 8.5 → 2.2'],
+    ['Cloud metadata', '169.254.169.254 open to every process', 'Root only, host-network containers included', 'others refused in 4 ms'],
+    ['User namespaces', 'aa-exec -p 1password → uid 0 in a namespace', 'Bypass closed; sgs-check tries it as nobody', "Qualys's 2025 bypass"],
+    ['io_uring', 'Open to every user; behind most kCTF exploits', 'Root only; no ML workload needed it', 'DataLoader · tf.data · Jupyter: unchanged'],
+    ['Kernel lockdown', 'Off without Secure Boot, as on the VMs', 'lockdown=integrity; steps aside for DKMS modules, so the GPU keeps its driver', '/dev/mem, unsigned modules: refused'],
+    ['Persistence', 'Nothing watched cron, ~/.bashrc, SSH keys', '71 places fingerprinted; changes shown at login', '8 kinds planted: all named'],
+  ];
+  const tiles = D.map(([a, b, c, m], i) => A(R, 120 + (i % 3) * 570, 286 + Math.floor(i / 3) * 322, `<div class="card tile" style="position:relative"><div class="tt"><span class="mono" style="font-size:18px;color:var(--dim)">0${i + 1}</span>${a}</div><div class="k red">Before</div><div class="bf">${b}</div><div class="k mint">After</div><div class="af">${c}</div><div class="m"><span class="pill ok" style="font-size:16px;letter-spacing:.02em">${m}</span></div></div>`, 540));
+  const ms = tiles.map((x) => x.querySelector('.m'));
+  const at = [S.L[1], S.L[3], S.L[4], S.w(4, 'and io_uring'), S.L[5], S.L[6]];
+  const mt = [S.L[2] + 0.2, ...at.slice(1).map((x) => x + 1.4)];
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    tiles.forEach((x, i) => vis(x, P(t, at[i] - 0.1, 0.6), { y: 40 }));
+    ms.forEach((x, i) => vis(x, P(t, mt[i], 0.5), { y: 10 }));
+  };
+});
+
+def('nonfinding', [169, 145, 255], (R, S) => {
+  const [k, hh] = head(R, 'Tested non-findings', 'Not every worry is real');
+  const a = A(R, 120, 312, `<div class="card" style="height:460px;padding:36px 42px;position:relative"><div class="kicker amber">Hypothesis</div><div style="font:750 38px/1.25 var(--sans);margin-top:16px;width:780px">A crashing job leaks its memory (weights, tokens) to other users through a core dump.</div><div class="tst"><div class="kicker" style="margin-top:30px">Test</div><div class="mono soft" style="font-size:22px;margin-top:12px">plant a token → crash Python → a second user searches the core</div></div><div class="res"><div class="kicker mint" style="margin-top:28px">Result</div><div style="font:650 27px/1.3 var(--sans);margin-top:12px">Core written 0600, owned by the crashing user · token found <span class="mint">0</span> times</div></div><div class="stamp info" style="right:40px;bottom:40px">Disproved</div></div>`, 1000);
+  const tst = a.querySelector('.tst'), res = a.querySelector('.res'), aSt = a.querySelector('.stamp');
+  const b = A(R, 1150, 312, `<div class="card" style="height:460px;padding:36px 40px;position:relative"><div class="kicker">Also checked</div><div style="font:750 34px/1.25 var(--sans);margin-top:16px">Does GPU memory carry over between processes?</div><div class="soft" style="font-size:25px;line-height:1.4;margin-top:22px">7,168 MB filled with a marker. The next user's process read the same memory back: all zeros, twice.</div><div class="stamp ok" style="left:40px;bottom:34px;font-size:22px">Verified safe</div></div>`, 650);
+  const bSt = b.querySelector('.stamp');
+  const ft = A(R, 0, 812, `<div class="serif soft" style="text-align:center;font:italic 500 40px/1.2 var(--serif)">Written down anyway, so nobody chases them again.</div>`, 1920);
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    vis(a, P(t, S.L[1] - 0.1, 0.6), { y: 40 });
+    vis(tst, P(t, S.L[1] + 2.0, 0.5));
+    vis(res, P(t, S.L[2] + 0.2, 0.5));
+    stamp(aSt, P(t, S.L[2] + 1.0, 0.4));
+    vis(b, P(t, S.L[3] - 0.1, 0.6), { y: 40 });
+    stamp(bSt, P(t, S.L[3] + 1.6, 0.4), -5);
+    vis(ft, P(t, S.L[4], 0.7));
+  };
+});
+
+def('results', [61, 220, 151], (R, S) => {
+  const [k, hh] = head(R, 'The results', 'The same sgs-check, on identical VMs');
+  const U = 16;
+  const bar = (y, name, sub, pass, warn, skip, big, bigc) => {
+    const el = A(R, 120, y, `<div style="display:flex;align-items:center;height:96px"><div style="width:420px"><div style="font:750 34px/1.1 var(--sans)">${name}</div><div class="mute" style="font-size:20px;margin-top:8px">${sub}</div></div><div class="bars" style="display:flex;height:44px;gap:3px;width:900px;align-items:center"><i style="height:44px;border-radius:6px 0 0 6px;background:var(--pass);width:0"></i><i style="height:44px;background:var(--warn);width:0"></i><i style="height:44px;border-radius:0 6px 6px 0;background:#3A4656;width:0"></i><span class="lbl mono" style="margin-left:20px;font-size:22px;white-space:nowrap;color:var(--soft)">${pass} PASS · ${warn} WARN</span></div><div style="margin-left:auto;text-align:right;width:200px"><div class="big ${bigc}" style="font-size:104px">${big}</div><div class="kicker" style="font-size:15px">warnings</div></div></div>`, 1680);
+    const [p, w, s] = el.querySelectorAll('.bars i');
+    return { el, p, w, s, lbl: el.querySelector('.lbl'), pass, warn, skip };
+  };
+  const b1 = bar(292, 'Lambda Stack', 'its repository and packages', 16, 15, 2, 15, 'amber');
+  const b2 = bar(408, 'Secure GPU Stack', 'v0.1', 47, 0, 1, 0, 'mint');
+  const grow = (b, t0, t) => {
+    vis(b.el, P(t, t0 - 0.3, 0.5), { y: 20 });
+    const p = P(t, t0, 1.3, E.inOut);
+    b.p.style.width = b.pass * U * p + 'px'; b.w.style.width = b.warn * U * p + 'px'; b.s.style.width = b.skip * U * p + 'px';
+    b.w.style.display = b.warn ? '' : 'none';
+    b.lbl.style.opacity = P(t, t0 + 1.1, 0.4);
+  };
+  const cv = A(R, 120, 548, `<div class="card" style="height:186px;padding:26px 34px;display:flex;align-items:center;gap:34px"><div class="big" style="font-size:124px;white-space:nowrap"><span class="amber">44</span><span class="mute" style="font-size:80px"> → </span><span class="mint">0</span></div><div><div style="font:700 29px/1.25 var(--sans)">known vulnerability advisories in the ML packages</div><div class="mute" style="font-size:20px;margin-top:10px">none in 149 packages, at release</div></div></div>`, 820);
+  const kb = A(R, 980, 548, `<div class="card" style="height:186px;padding:26px 34px;border-color:rgba(61,220,151,.45)"><div class="kicker mint">krabs · real GPU · GTX 1070</div><div style="font:800 48px/1 var(--sans);margin-top:18px">55 PASS · <span class="amber">3 WARN</span> · <span class="mute">2 SKIP</span></div><div class="mute" style="font-size:20px;margin-top:14px">WARNs: krabs's own, from before the stack · SKIPs: Pascal can't run PyTorch or JAX</div></div>`, 820);
+  const ST = [['Attack demo 9 / 9', 'from another machine on the network'], ['User checks 13 / 13', 'the stack still works for a normal user'], ['GPU matmul −0.5%', '3.97 → 3.94 TFLOP/s in the sandbox'], ['DataLoader: noise', '4 workers, ranges overlap']];
+  const sts = ST.map(([a, b], i) => A(R, 120 + i * 425, 764, `<div class="card stat"><div class="a">${a}</div><div class="b">${b}</div></div>`, 405));
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    grow(b1, S.L[1] + 0.3, t);
+    grow(b2, S.w(1, 'Secure GPU Stack'), t);
+    vis(cv, P(t, S.L[2], 0.6), { y: 30 });
+    vis(kb, P(t, S.L[3], 0.6), { y: 30 });
+    vis(sts[0], P(t, S.L[4], 0.5), { y: 24 }); vis(sts[1], P(t, S.L[4] + 1.0, 0.5), { y: 24 });
+    vis(sts[2], P(t, S.w(5, 'a GPU matrix'), 0.5), { y: 24 }); vis(sts[3], P(t, S.w(5, 'within half'), 0.5), { y: 24 });
+  };
+});
+
+def('limits', [255, 176, 32], (R, S) => {
+  const [k, hh] = head(R, 'Honest limits', "What isn't proven yet", 'amber');
+  const C = [
+    ['PyTorch and JAX on a current GPU', "krabs's GTX 1070 is Pascal (6.1); their CUDA builds need 7.5+"],
+    ["Lambda's own cloud image", 'firewall, default users, Secure Boot: needs an instance'],
+    ['NVSwitch · MIG · InfiniBand', 'no such hardware on krabs'],
+    ['Speed vs. Lambda Stack, on the same GPU', 'the benchmark is in the plan'],
+    ['Strict outbound mode', "experimental: one VM's lockout is still unexplained"],
+    ['v0.2: our own signed apt repo · a release-key holder', 'designed, not built'],
+  ];
+  const rows = C.map(([a, b], i) => A(R, 120, 300 + i * 92, `<div class="check"><div class="bx"></div><div><div class="ct">${a}</div><div class="cs">${b}</div></div></div>`, 1060));
+  const doc = A(R, 1260, 300, `<div class="card" style="height:400px;padding:36px 38px;border-color:rgba(255,176,32,.5)"><svg width="56" height="68" viewBox="0 0 56 68" fill="none" stroke="#FFB020" stroke-width="3.5" stroke-linejoin="round"><path d="M6 4H36L52 20V64H6Z"/><path d="M36 4V20H52"/><path d="M15 34H42M15 44H42M15 54H32" stroke-linecap="round"/></svg><div class="mono" style="font-size:22px;margin-top:22px;color:var(--warn)">docs/lambda-test-plan.md</div><div style="font:750 34px/1.2 var(--sans);margin-top:14px">Written, and waiting for an instance</div><div class="mute" style="font-size:21px;line-height:1.45;margin-top:16px">driver on Turing or newer · PyTorch convolutions and NCCL · Lambda's image · performance</div></div>`, 540);
+  const at = [S.L[1], S.w(2, "Lambda's own"), S.w(2, 'NVSwitch'), S.w(2, 'a speed'), S.L[3], S.L[3] + 1.6];
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    rows.forEach((r, i) => { vis(r, P(t, at[i] - 0.1, 0.5), { x: -24, y: 0 }); if (i === 5) r.style.opacity *= 0.6; });
+    vis(doc, P(t, S.L[4] - 0.1, 0.6), { x: 40, y: 0 });
+  };
+});
+
+def('how', [61, 220, 151], (R, S) => {
+  const [k, hh] = head(R, 'How I work', 'Six habits behind every result');
+  const H = [
+    ['Understand the incumbent first', '14 findings in Lambda Stack before a line of code'],
+    ['Ask questions that change the design', "who uses it, what's in it, how it ships, how strict"],
+    ['Test on the messiest machine you have', 'krabs found 15 problems no VM could'],
+    ['Give every check a negative control', 'plant the attack; the check has to fail'],
+    ['Treat every reviewer as untrusted', 'human or AI, the coding agent I built with included'],
+    ['Write down the misses and non-findings', 'rejected claims and disproved worries are results too'],
+  ];
+  const items = H.map(([a, b], i) => A(R, 120 + (i % 2) * 860, 300 + Math.floor(i / 2) * 186, `<div class="habit"><div class="num">${i + 1}</div><div><div class="ht">${a}</div><div class="hs">${b}</div></div></div>`, 820));
+  const ft = A(R, 0, 870, `<div class="mono mute" style="text-align:center;font-size:21px;letter-spacing:.03em">Built with an AI coding agent · reviewed by open-weight models · verified on hardware</div>`, 1920);
+  return (t) => {
+    vis(k, P(t, 0.1)); vis(hh, P(t, 0.2), { y: 30 });
+    items.forEach((x, i) => vis(x, P(t, S.L[i + 1] - 0.1, 0.6), { y: 30 }));
+    vis(ft, P(t, S.w(5, 'I built this'), 0.7));
+  };
+});
+
+def('outro', [61, 220, 151], (R, S) => {
+  const lines = [
+    'sgs-nvidia-cuda.gpg is still the key pinned at install',
+    'No apt pin can override Ubuntu\'s updates or force downgrades',
+    'Driver branch R580 is supported by NVIDIA until 2028-06',
+    'NVIDIA kernel module is signed (Canonical Ltd. Kernel Module Signing)',
+    'GPU device files are for the video group only, and locked (jm)',
+    'Published container ports stay on localhost, on every Docker network',
+    'Containers get the GPU only when asked (--gpus or --device)',
+    'Stack packages are read-only for users',
+    'No known vulnerabilities in 178 Python packages',
+    'All 59497 installed files match what their packages recorded',
+    'The driver, CUDA, cuDNN, NCCL and container files match (90 packages)',
+  ];
+  const T = A(R, 260, 226, `<div class="term" style="height:572px"><div class="bar"><i class="d r"></i><i class="d y"></i><i class="d g"></i><span>jm@krabs: ~</span></div><div class="tb" style="font-size:23px;line-height:1.55;padding:24px 36px"><div><span class="pr">$ </span><span class="cmd"></span></div>${lines.map((l) => `<div class="ln" style="opacity:0"><span class="mint">  [PASS]</span> ${l}</div>`).join('')}<div class="res" style="opacity:0;margin-top:10px;font-weight:700">== Result: <span class="mint">55 PASS</span>, <span class="amber">3 WARN</span>, <span class="mute">2 SKIP</span></div></div></div>`, 1400);
+  const cmd = T.querySelector('.cmd'), lns = [...T.querySelectorAll('.ln')], res = T.querySelector('.res');
+  const L = A(R, 860, 196, `<div>${LOGO(200)}</div>`, 200, true);
+  const svg = L.querySelector('svg');
+  const ttl = A(R, 0, 440, `<div style="text-align:center;font:800 112px/1 var(--sans);letter-spacing:-.034em">Secure GPU Stack <span class="mono mint" style="font-size:44px;letter-spacing:0;vertical-align:middle">v0.1</span></div>`, 1920);
+  const tag = A(R, 0, 590, `<div style="text-align:center;font:600 40px/1 var(--sans);color:var(--soft)">The same tools. Safe defaults. Proof.</div>`, 1920);
+  const nxt = A(R, 0, 690, `<div class="mono amber" style="text-align:center;font-size:27px">Next stop: a real Lambda instance →</div>`, 1920);
+  return (t) => {
+    const out = P(t, S.L[0] - 1.1, 0.6, E.inOut);
+    vis(T, P(t, 0.1, 0.5)); T.style.opacity *= 1 - out; T.style.transform = `scale(${1 - 0.04 * out})`;
+    const s = 'sudo sgs-check --gpu-test';
+    cmd.textContent = s.slice(0, Math.round(s.length * P(t, 0.4, 1.1, E.lin)));
+    lns.forEach((l, i) => (l.style.opacity = P(t, 1.8 + i * 0.14, 0.1)));
+    res.style.opacity = P(t, 1.8 + lines.length * 0.14 + 0.25, 0.2);
+    svg.style.opacity = out;
+    drawLogo(svg, t, S.L[0] - 0.6);
+    svg.style.filter = `drop-shadow(0 0 ${22 * P(t, S.L[0] + 1.2, 1)}px rgba(61,220,151,.45))`;
+    vis(ttl, P(t, S.L[0] + 0.2, 0.8), { y: 30 });
+    vis(tag, P(t, S.L[0] + 1.4, 0.7), { y: 20 });
+    vis(nxt, P(t, S.L[1], 0.6), { y: 16 });
+    document.getElementById('stage').style.opacity = 1 - P(t, S.dur - 1.6, 1.4, E.inOut);
+  };
+});
+
+// ---------- engine ----------
+const TL = globalThis.TIMELINE;
+window.DURATION = TL.duration;
+window.FPS = TL.fps;
+const stageEl = document.getElementById('stage');
+const glow = document.getElementById('glow');
+const capEl = document.querySelector('#cap span');
+const hudEl = document.getElementById('hud');
+const chB = document.querySelector('#hud .ch b'), chS = document.querySelector('#hud .ch span');
+const progI = document.querySelector('#prog i');
+let chapterNo = 0;
+const live = TL.scenes.map((sc) => {
+  const root = document.createElement('div');
+  root.className = 'scene';
+  root.style.display = 'none';
+  stageEl.appendChild(root);
+  const S = { dur: sc.dur, L: sc.lines.map((l) => l.start), E: sc.lines.map((l) => l.start + l.dur), T: sc.lines.map((l) => l.text) };
+  // Roughly when a phrase is spoken inside line i, by its position in the text.
+  S.w = (i, phrase) => {
+    const k = S.T[i].indexOf(phrase);
+    if (k < 0) throw new Error(`${sc.id}: "${phrase}" not in line ${i}`);
+    return S.L[i] + ((S.E[i] - S.L[i]) * k) / S.T[i].length;
+  };
+  const def = SCN[sc.id];
+  const update = def.build(root, S);
+  const no = sc.chapter ? ++chapterNo : 0;
+  return { sc, root, S, update, glow: def.glow, no };
+});
+for (const x of live) if (x.no) { const u = document.createElement('u'); u.style.left = (100 * x.sc.start / TL.duration) + '%'; document.getElementById('prog').appendChild(u); }
+
+let shown = -1;
+window.seek = function (t) {
+  let i = live.findIndex((x) => t >= x.sc.start && t < x.sc.start + x.sc.dur);
+  if (i < 0) i = t < 0 ? 0 : live.length - 1;
+  const x = live[i];
+  if (i !== shown) { live.forEach((y, j) => (y.root.style.display = j === i ? 'block' : 'none')); shown = i; }
+  const lt = t - x.sc.start;
+  const f = clamp(Math.min(lt / 0.45, (x.sc.dur - lt) / 0.45));
+  x.root.style.opacity = f;
+  if (x.sc.id !== 'outro') stageEl.style.opacity = 1;
+  x.update(lt);
+
+  const [r, g, b] = x.glow;
+  const gx = 960 + 380 * Math.sin(t * 0.11 + i), gy = 520 + 180 * Math.cos(t * 0.09 + i * 1.7);
+  glow.style.left = gx - 800 + 'px'; glow.style.top = gy - 800 + 'px';
+  glow.style.background = `radial-gradient(closest-side, rgba(${r},${g},${b},${0.13 * f}), rgba(${r},${g},${b},0))`;
+
+  hudEl.style.opacity = x.no ? f : 0;
+  if (x.no) { chB.textContent = String(x.no).padStart(2, '0'); chS.textContent = x.sc.chapter; }
+  progI.style.width = (100 * t / TL.duration) + '%';
+
+  let cap = '';
+  let cp = 0;
+  for (const l of x.sc.lines) {
+    if (lt >= l.start - 0.05 && lt < l.start + l.dur + 0.3) { cap = l.text; cp = Math.min(P(lt, l.start - 0.05, 0.15), 1 - P(lt, l.start + l.dur + 0.15, 0.15)); }
+  }
+  capEl.textContent = cap;
+  capEl.parentElement.style.opacity = cap ? cp : 0;
+};
+const q = new URLSearchParams(location.search);
+window.seek(q.has('t') ? +q.get('t') : 0);
+</script>
+</body>
+</html>

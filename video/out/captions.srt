@@ -1,0 +1,375 @@
+1
+00:00:01,000 --> 00:00:04,286
+This is how a lot of GPU machines get set up.
+
+2
+00:00:04,406 --> 00:00:08,879
+One command, piped straight into a shell, that ends up running as root.
+
+3
+00:00:09,279 --> 00:00:10,924
+Nothing checks what it runs.
+
+4
+00:00:13,724 --> 00:00:15,890
+This is Secure GPU Stack.
+
+5
+00:00:16,010 --> 00:00:20,934
+The same tools as Lambda Stack, with safe defaults, and the proof to back them.
+
+6
+00:00:22,934 --> 00:00:27,991
+The brief: build an alternative to Lambda Stack, with security built in.
+
+7
+00:00:28,111 --> 00:00:37,502
+Lambda Stack is the driver, CUDA, cuDNN, NCCL, PyTorch, TensorFlow, JAX, Jupyter and Docker, in one install.
+
+8
+00:00:37,802 --> 00:00:41,506
+My first plan was a locked-down inference appliance.
+
+9
+00:00:41,626 --> 00:00:45,348
+The feedback was clear: make it a real alternative.
+
+10
+00:00:45,748 --> 00:00:50,681
+So before writing any code, I asked the questions that would change the design.
+
+11
+00:00:50,801 --> 00:00:55,041
+Who uses it? People already renting GPUs on Lambda.
+
+12
+00:00:55,161 --> 00:00:58,118
+What's in it? Everything Lambda Stack has.
+
+13
+00:00:58,238 --> 00:01:01,775
+How does it ship? The same way: one command.
+
+14
+00:01:01,895 --> 00:01:05,651
+And reaching Jupyter through an SSH tunnel is acceptable.
+
+15
+00:01:07,251 --> 00:01:13,924
+Then I audited the thing I was replacing: fourteen findings, each with evidence and a way to reproduce it.
+
+16
+00:01:14,324 --> 00:01:21,524
+The worst one: Lambda's apt pin, at priority 1001, outranks Ubuntu's own security channel.
+
+17
+00:01:21,644 --> 00:01:27,775
+Ubuntu ships driver 580.178, with this year's security fixes.
+
+18
+00:01:27,895 --> 00:01:34,625
+The pin holds machines on 580.105, and apt upgrade will never move them.
+
+19
+00:01:35,025 --> 00:01:38,370
+The default driver branch is end of life.
+
+20
+00:01:38,490 --> 00:01:45,479
+The ML packages carry 44 known vulnerability advisories, some of them code execution when a model loads.
+
+21
+00:01:45,779 --> 00:01:51,918
+The repository is plain HTTP. One key is trusted for every repository.
+
+22
+00:01:52,038 --> 00:01:55,822
+And the install verifies nothing before it runs as root.
+
+23
+00:01:57,322 --> 00:01:59,198
+That gave me three rules.
+
+24
+00:01:59,318 --> 00:02:03,593
+Same experience: if code runs on Lambda Stack, it runs here.
+
+25
+00:02:03,713 --> 00:02:10,606
+Safe defaults: nothing reachable but SSH, least privilege, and patches that actually arrive.
+
+26
+00:02:10,726 --> 00:02:16,269
+And proof: a check command, sgs-check, that shows the difference on any machine.
+
+27
+00:02:18,069 --> 00:02:21,402
+Here's what the installer builds, layer by layer.
+
+28
+00:02:21,522 --> 00:02:30,157
+Ubuntu 24.04, hardened: a firewall, keys-only SSH, pinned kernel settings, and audit logging.
+
+29
+00:02:30,277 --> 00:02:37,247
+NVIDIA's long-term R580 driver, from Ubuntu's own archive, so security fixes keep flowing.
+
+30
+00:02:37,367 --> 00:02:44,192
+CUDA, cuDNN and NCCL, over HTTPS, each source with its own pinned key.
+
+31
+00:02:44,312 --> 00:02:49,567
+Docker without the root-equivalent docker group, and published ports that stay on localhost.
+
+32
+00:02:49,687 --> 00:02:55,735
+The frameworks live in a read-only, hash-locked environment, apart from the system Python.
+
+33
+00:02:55,855 --> 00:02:59,768
+Jupyter sits on a private socket, inside a sandbox.
+
+34
+00:02:59,888 --> 00:03:03,535
+And sgs-check audits all of it, every day.
+
+35
+00:03:03,935 --> 00:03:11,871
+It ships as one verifiable command, with a checksum, a signature, a cloud-init wrapper for Lambda, and an SBOM.
+
+36
+00:03:13,571 --> 00:03:17,301
+I tested in three places, each harder than the last.
+
+37
+00:03:17,421 --> 00:03:22,105
+Local virtual machines first, comparing a Lambda baseline with my stack.
+
+38
+00:03:22,225 --> 00:03:27,152
+Then krabs: my own laptop, with a GTX 1070.
+
+39
+00:03:27,272 --> 00:03:34,416
+It's a lived-in machine. 198 days of uptime, Docker Desktop, an old CUDA install.
+
+40
+00:03:34,536 --> 00:03:39,218
+Messier than any fresh cloud image, which is exactly why I used it.
+
+41
+00:03:39,518 --> 00:03:43,179
+The third, a real Lambda instance, is next.
+
+42
+00:03:44,879 --> 00:03:49,687
+The first real install found fifteen problems the VMs never could.
+
+43
+00:03:49,807 --> 00:03:54,697
+On Ubuntu's newer kernels, the GPU would have been dead after a reboot.
+
+44
+00:03:54,817 --> 00:03:58,096
+TensorFlow quietly ran on the CPU.
+
+45
+00:03:58,216 --> 00:04:07,134
+PyTorch's cuDNN and NCCL were silently overwritten by TensorFlow's, seventy files, while pip check said everything was fine.
+
+46
+00:04:07,254 --> 00:04:13,426
+Automatic updates looked on, but a hung job had blocked every update for 99 days.
+
+47
+00:04:13,546 --> 00:04:18,075
+And my own GPU check said PASS when JAX couldn't compute at all.
+
+48
+00:04:18,675 --> 00:04:22,914
+The lesson: a check that can't fail is worse than no check.
+
+49
+00:04:25,014 --> 00:04:27,932
+So every round follows the same loop.
+
+50
+00:04:28,052 --> 00:04:32,988
+Form a hypothesis. Attack the real machine, or plant the bad state.
+
+51
+00:04:33,108 --> 00:04:38,878
+Fix it. Then prove the fix with a negative control: the check has to fail when it should.
+
+52
+00:04:38,998 --> 00:04:49,070
+Then hand it to independent reviewers: a fresh code review with no context, and two open-weight models, DeepSeek and GLM, as read-only red teamers.
+
+53
+00:04:49,190 --> 00:04:54,749
+Their findings are untrusted until reproduced. Many didn't hold up, and I wrote down why.
+
+54
+00:04:55,049 --> 00:05:02,351
+One I had dismissed was right. GLM said twice that Docker and NVIDIA updates never auto-installed.
+
+55
+00:05:02,471 --> 00:05:05,166
+My own check had cut a label short.
+
+56
+00:05:05,566 --> 00:05:12,032
+That loop produced seventy-six findings, each one fixed or disproved on a real machine.
+
+57
+00:05:14,032 --> 00:05:22,362
+The biggest one: by Ubuntu's default, the GPU's device files are open to every account on the machine, service accounts included.
+
+58
+00:05:22,482 --> 00:05:29,943
+My first fix re-applied the permissions after every change. A looping attacker still got in, twenty times out of twenty.
+
+59
+00:05:30,063 --> 00:05:40,788
+NVIDIA's own library reopens the files whenever root uses the GPU. So I locked each file with a read-only bind mount. Zero in 2.9 million tries.
+
+60
+00:05:40,908 --> 00:05:47,300
+Reviewing the lock exposed a 45-millisecond window when the files are created. Ten out of ten.
+
+61
+00:05:47,420 --> 00:05:50,332
+Creating them closed from the start fixed that.
+
+62
+00:05:50,632 --> 00:05:55,874
+Zero opens in seventeen million tries, verified across four reboots.
+
+63
+00:05:57,974 --> 00:05:59,935
+Same loop, many doors.
+
+64
+00:06:00,055 --> 00:06:07,384
+Jupyter listened on localhost, where any account got an answer. Now it's a private socket, reached through an SSH tunnel.
+
+65
+00:06:07,504 --> 00:06:13,041
+Its sandbox took systemd's exposure score from 8.5 to 2.2.
+
+66
+00:06:13,161 --> 00:06:17,649
+Cloud metadata is for root only, host-network containers included.
+
+67
+00:06:17,769 --> 00:06:24,820
+An aa-exec bypass of Ubuntu's user-namespace restriction is closed, and io_uring is for root only.
+
+68
+00:06:24,940 --> 00:06:29,916
+Kernel lockdown is on, and steps aside when it would cost the GPU its driver.
+
+69
+00:06:30,036 --> 00:06:35,876
+And sgs-check watches seventy-one places where malicious code makes itself permanent.
+
+70
+00:06:37,776 --> 00:06:39,419
+Not every worry is real.
+
+71
+00:06:39,539 --> 00:06:44,552
+I tested whether a crashing job leaks its memory to other users through core dumps.
+
+72
+00:06:44,672 --> 00:06:48,206
+It doesn't. The kernel writes them private to their owner.
+
+73
+00:06:48,506 --> 00:06:52,968
+GPU memory, too, comes back zeroed between processes.
+
+74
+00:06:53,088 --> 00:06:56,247
+Both are written down, so nobody chases them again.
+
+75
+00:06:58,147 --> 00:07:01,849
+The results. Same check, on identical VMs.
+
+76
+00:07:01,969 --> 00:07:10,006
+Lambda's stack: sixteen pass, fifteen warnings. Secure GPU Stack: forty-seven pass, zero warnings.
+
+77
+00:07:10,126 --> 00:07:14,906
+Known vulnerabilities in the ML packages: from forty-four to zero.
+
+78
+00:07:15,026 --> 00:07:21,500
+On the real GPU: fifty-five pass. The three warnings are krabs's own, from before the stack.
+
+79
+00:07:21,620 --> 00:07:25,662
+The attack demo passes nine of nine from another machine.
+
+80
+00:07:25,782 --> 00:07:34,032
+And the hardening costs nothing measurable: a GPU matrix multiply in the sandboxed notebook ran within half a percent of a plain shell.
+
+81
+00:07:36,332 --> 00:07:37,740
+What isn't proven yet.
+
+82
+00:07:37,860 --> 00:07:43,863
+krabs's Pascal GPU can't run current PyTorch or JAX, so that needs a current GPU.
+
+83
+00:07:43,983 --> 00:07:50,606
+So do Lambda's own image, NVSwitch, and a speed comparison with Lambda Stack on the same hardware.
+
+84
+00:07:50,726 --> 00:07:53,805
+Strict outbound mode is still experimental.
+
+85
+00:07:53,925 --> 00:07:58,395
+The test plan for all of it is written, and waiting for a Lambda instance.
+
+86
+00:08:00,295 --> 00:08:02,083
+So, how I work.
+
+87
+00:08:02,203 --> 00:08:05,135
+Understand the incumbent before building.
+
+88
+00:08:05,255 --> 00:08:08,099
+Ask the questions that change the design.
+
+89
+00:08:08,219 --> 00:08:11,001
+Test on the messiest machine you have.
+
+90
+00:08:11,121 --> 00:08:13,834
+Give every check a negative control.
+
+91
+00:08:13,954 --> 00:08:23,490
+Treat every reviewer, human or AI, as untrusted until reproduced. I built this with an AI coding agent, and that rule applied to it too.
+
+92
+00:08:23,610 --> 00:08:29,476
+And write down the misses, the rejections and the non-findings. They're results too.
+
+93
+00:08:37,276 --> 00:08:43,121
+Secure GPU Stack. The same tools, safe defaults, and the proof to back them.
+
+94
+00:08:43,421 --> 00:08:46,780
+Next stop: a real Lambda instance.

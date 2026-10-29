@@ -17,3 +17,11 @@ id_*
 # Build output and noisy test-run logs
 dist/
 tests/results/*.log
+
+# The walkthrough video: build files and rendered videos (regenerate with video/render.mjs)
+video/build/
+video/out/*.mp4
+
+# Python bytecode
+__pycache__/
+*.pyc
