@@ -158,6 +158,123 @@ small GPT-style model, both trained in bf16.
   within 2% of Lambda Stack and slightly ahead, most likely from its newer
   PyTorch and cuDNN (9.26 against 9.8).
 
+## Hill-climbing on M2 (rounds AB onwards)
+
+After v0.1.1, rounds continued on M2's VMs, with one rule from the user:
+security matters, but not at the cost of features users rely on. Rounds
+without the GPU ran with the card left on M2's desktop.
+
+### Round AB: an independent review of the v0.1.1 changes
+
+A Claude reviewer read the v0.1.0 → v0.1.1 diff and the bench scripts without
+seeing my conclusions. It confirmed the five fixes and found seven issues. Each
+was checked before anything changed:
+
+82. **An upgrade could accept a planted IPython startup file without review.**
+    Finding 81 narrowed the watched place `startup/` to `startup/*.py` and
+    `startup/*.ipy`. The installer accepts places the record didn't watch, so a
+    `00-planted.py` that the daily check was reporting would have been
+    accepted silently by the upgrade. Fixed: `STARTUP_RENAMED` tells the record
+    which new place replaced which old one, and a file the old place covered
+    keeps its reviewed content. Reproduced on VM B with a record rewritten the
+    way 0.1.0 wrote it: the planted file is still reported after the upgrade,
+    and nothing else is.
+
+The others: the GPU test called a failed convolution on Volta "expected",
+though only Pascal was ever tested (now only Pascal and older, and the
+installer's note says Volta is untested); the bench's handoff script could
+leave M2 without a display if its session died halfway (it now runs itself in
+a transient systemd unit and undoes itself on a signal, tested in the next
+GPU window), checked every passed-through device instead of the GPU's own
+group, and picked GPUs differently from `vm.sh`; and the bench's VM disks and
+SSH key, kept next to its scripts, weren't gitignored. One was left as it is:
+JAX inheriting `XLA_FLAGS` from TensorFlow's hook, which works on Ampere
+(tested with finding 79's fix).
+
+### Round AC: what another account can do through `/tmp`
+
+83. **Another account's code ran as you through `torch.compile`.** PyTorch
+    caches the code it generates, and runs it again on a cache hit, in
+    `/tmp/torchinductor_<user>`. Any account can create that folder first,
+    which is easy after every reboot empties `/tmp`, and then owns it. On VM B,
+    `nobody` created it; `ubuntu` compiled a function; `nobody` swapped
+    `ubuntu`'s cache subfolder for a copy with one added line; `ubuntu` ran the
+    same script again, and the line ran with uid 1000.
+    `tests/compile-cache-attack.sh` reproduces it on any machine: VULNERABLE
+    with PyTorch's default cache folder, SAFE on the stack. With the default cloud
+    user's passwordless sudo, that's one step from root. Lambda Stack's PyTorch
+    has the same default.
+    - Fixed in the stack's startup hook (every stack Python, notebooks and
+      `sgs-venv` environments): `TORCHINDUCTOR_CACHE_DIR` and
+      `QUACK_CACHE_DIR` (the vendored CuTe kernels for Hopper and Blackwell)
+      point into `~/.cache`.
+    - That wasn't enough: precompiled C++ headers and PyTorch's newer on-disk
+      caches build the `/tmp` path themselves, whatever the setting says. So
+      Python processes also get a private temp folder, `~/.cache/tmp`
+      (`TMPDIR`). After that, nothing was written to the planted folder.
+    - `sgs-check` checks the hook works, and warns about any
+      `torch.compile` cache folder in `/tmp` owned by someone other than the
+      user it's named for. Planted: WARN; removed: PASS.
+    - Nothing users do changed: pip building from source, a forkserver pool
+      and a `Manager` (their sockets go in the temp folder), DataLoader
+      workers, `torch.save` into temp folders, and Jupyter all work. A plain
+      shell's `/tmp` is untouched.
+84. **Installed under a strict umask, the stack worked for no one but root.**
+    `sudo` keeps the admin's umask. With 077, `/opt/sgs/venv` came out
+    `drwx------`: PyTorch didn't import, `sgs-venv` and Jupyter failed, 7 user
+    checks failed, and the installer said it had succeeded. Fixed: the
+    installer sets umask 022, and every run makes the stack's environments
+    readable by all, so re-running it repairs an earlier install (VM C: from
+    broken to all user checks passing).
+85. **`sgs-check` didn't notice.** "Stack packages are read-only for users"
+    passed on that broken install. Now `nobody` has to be able to load the
+    frameworks, or it's a WARN.
+
+Considered and left alone, because the fix would cost users features:
+
+- **Files an SSH session writes to `/tmp` are readable by every account.**
+  Ubuntu's login umask is 0002: a checkpoint, saved features and a notes file
+  holding a token, all read by `nobody`. A login umask of 027 would close it,
+  but files built into a Docker image keep their modes, and an image that
+  runs as a non-root user (good practice for an inference server) could no
+  longer read its own files. Notebooks already run with umask 077, and home
+  folders are closed to other accounts; `/tmp` stays shared.
+
+### Rounds AD and AE: little left to gain
+
+- **AD, build scripts in users' own environments.** Making `sgs-venv`
+  install wheels only would stop a package's build script from running at
+  install time, but break every package published only as source, and a
+  malicious package still runs its code when imported. Declined.
+- **AE, kernel settings.** Ubuntu's 24.04 kernel already has what was left
+  on the list: unprivileged userfaultfd off, TIOCSTI compiled out, ptrace,
+  perf and BPF restricted. `kexec_load_disabled` would add little on top of
+  lockdown, which already refuses unsigned kernels. No change.
+
+### Round AF: the GPU again, with the published release
+
+- **The published v0.1.1, from GitHub through the cloud-init wrapper** with
+  the SHA-256 from the annotated tag: installed and rebooted in 9 minutes,
+  `sgs-check --gpu-test` 56 PASS, 0 WARN, 0 SKIP, every framework's matrix
+  multiply and convolution on the GPU.
+- **Upgraded with rounds AB–AC:** 58 PASS, 0 WARN, 0 SKIP (the two new
+  checks). `torch.compile` on the GPU, with `nobody`'s folder planted first:
+  the Triton kernels went to `~/.cache/torchinductor` (16 files) and nothing
+  into the planted folder.
+- **GPU containers on Ampere:** `--gpus all` and CDI (`--device
+  nvidia.com/gpu=all`) see the RTX 3080; a container that sets
+  `NVIDIA_VISIBLE_DEVICES=all` without asking gets no GPU; no-new-privileges
+  is on; and PyTorch computed on the GPU inside a `python:3.12-slim`
+  container.
+- **The bench's handoff,** run plainly with `sudo`, moved itself into a
+  systemd unit and worked (review fix).
+- **Installed with `--no-cuda-toolkit`** on a fresh VM: no `ptxas` anywhere
+  on the system, yet Keras training with convolutions works, which is
+  finding 79's fix in a full install; 58 PASS, 0 WARN, 0 SKIP.
+
+No new findings: with AD and AE, three rounds in a row added little, so the
+hill-climb stopped here, as the user asked.
+
 ## What M2 can't prove
 
 - **Lambda's own cloud image:** whether its JupyterLab is exposed, default

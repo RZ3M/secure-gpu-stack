@@ -16,6 +16,13 @@
 # settings, so a reboot also undoes it.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run as root" >&2; exit 1; }
+# Ending the desktop session can kill the terminal this was started from, and a
+# dropped SSH connection would stop it halfway, leaving the host without its
+# display. A transient systemd unit outlives both.
+if [ -z "${INVOCATION_ID:-}" ] && { [ "${1:-}" = to-vm ] || [ "${1:-}" = to-host ]; }; then
+  exec systemd-run --quiet --collect --wait --pipe --unit="sgs-gpu-handoff-$1" \
+    ${SGS_GPU:+--setenv=SGS_GPU="$SGS_GPU"} "$(readlink -f "$0")" "$@"
+fi
 
 GPU="${SGS_GPU:-$(lspci -D -d 10de: | awk '/VGA compatible|3D controller/ { print $1; exit }')}"
 [ -n "$GPU" ] || { echo "No NVIDIA GPU found" >&2; exit 1; }
@@ -52,7 +59,7 @@ to_vm() {
   if [ "$(driver_of "$GPU")" = vfio-pci ]; then echo "The GPU is already on vfio-pci"; return; fi
   : > "$STATE"
   if systemctl is-active -q nvidia-persistenced; then echo persistenced >> "$STATE"; fi
-  trap 'echo "Handoff failed; giving the GPU back to the host" >&2; to_host' ERR
+  trap 'echo "Handoff failed or interrupted; giving the GPU back to the host" >&2; to_host; exit 1' ERR HUP INT TERM
 
   echo "Stopping the login screen and ending graphical sessions"
   systemctl stop display-manager || true
@@ -85,17 +92,20 @@ to_vm() {
     echo "$f" > /sys/bus/pci/drivers_probe
     if [ "$(driver_of "$f")" != vfio-pci ]; then echo "$f didn't bind to vfio-pci" >&2; false; fi
   done
-  trap - ERR
+  trap - ERR HUP INT TERM
   status
 }
 
 to_host() {
-  trap - ERR
-  set +e
-  if fuser -s /dev/vfio/[0-9]* 2>/dev/null; then
+  trap - ERR HUP INT TERM
+  # Only the GPU's own IOMMU group: another VM may hold an unrelated device.
+  local group
+  group=$(basename "$(readlink "/sys/bus/pci/devices/$GPU/iommu_group")")
+  if fuser -s "/dev/vfio/$group" 2>/dev/null; then
     echo "A VM still has the GPU; stop it first (vm.sh stop NAME)" >&2
     return 1
   fi
+  set +e
   local f
   for f in $FUNCS; do
     echo > "/sys/bus/pci/devices/$f/driver_override"

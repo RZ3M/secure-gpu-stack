@@ -107,6 +107,18 @@ first. On first boot, Ubuntu's own apt jobs usually run while the installer
 does; check `/var/log/cloud-init-output.log` for "Waiting for another apt
 run" and an install that still finished (krabs test-bench finding 51).
 
+## Can another account run code as you through `torch.compile`?
+
+On both instances, as the default user (it uses sudo to act as `nobody`):
+
+```bash
+bash secure-gpu-stack-0.1.1/tests/compile-cache-attack.sh
+```
+
+VULNERABLE means another account's code ran as you through the compiled-code
+cache in `/tmp` (M2 finding 83). Expect VULNERABLE on Lambda Stack if its
+image has `python3-dev`, and SAFE on Secure GPU Stack.
+
 ## Same speed?
 
 Run the same PyTorch benchmark on both instances. The `--gpu-test` matmul

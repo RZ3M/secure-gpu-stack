@@ -1,0 +1,15 @@
+== multiprocessing: forkserver and a Manager put their sockets in the temp folder
+  PASS  forkserver pool and Manager; temp folder: /home/ubuntu/.cache/tmp
+== DataLoader workers, torch.save into tempfile, a long temp path
+  PASS  DataLoader with 2 workers, torch.save and load in a temp folder
+== a subprocess inherits the private temp folder
+  child mktemp: /home/ubuntu/.cache/tmp/tmp.sBxnrrlKSh
+== a plain shell outside Python is unchanged
+  shell TMPDIR=<unset> mktemp: /tmp/tmp.qOZKIJk7IT
+== sgs-check
+== Result: 51 PASS, 0 WARN, 0 SKIP
+== GPU device files on this GPU-less boot
+crw-rw-rw- 1 root root 195, 255 Oct 30 00:07 /dev/nvidiactl
+0
+
+[exited with code 1]

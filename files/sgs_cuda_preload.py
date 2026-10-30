@@ -7,11 +7,11 @@ TensorFlow's CUDA 12 wheels in their own hash-locked folder, /opt/sgs/tf-cuda12.
 
 TensorFlow opens these libraries by name, and its own search path doesn't
 reach that folder (it doesn't even reach its cuSOLVER wheel in a normal
-install). Its XLA compiler doesn't find the folder's ptxas either; see
-_point_xla_at_cuda12. Left alone, it quietly falls back to the CPU, or picks up whatever
+install). Left alone, it quietly falls back to the CPU, or picks up whatever
 copy is on the system path: Ubuntu's CUDA 12.0 libraries, or the CUDA 13 cuDNN
 the stack installs system-wide. On the krabs test bench that cost TensorFlow
-the GPU, then broke every GPU convolution.
+the GPU, then broke every GPU convolution. Its XLA compiler doesn't find the
+folder's ptxas either; see _point_xla_at_cuda12.
 
 Just before tensorflow's own code runs, this loads the folder's libraries by
 full path, so TensorFlow's lookups by name find libraries that are already
@@ -21,8 +21,8 @@ datasets does) don't trigger it, so PyTorch-only processes never get
 TensorFlow's cuDNN and NCCL. Nothing is added to the system library path.
 Loaded at startup by sgs-cuda-preload.pth.
 
-It also keeps JAX on the CPU when no NVIDIA driver is loaded (see the end of
-the file).
+It also keeps JAX on the CPU when no NVIDIA driver is loaded, and keeps
+torch.compile's code caches out of /tmp (see the end of the file).
 
 Library names are shared across CUDA versions, so a process that imports both
 PyTorch and TensorFlow gets whichever cuDNN and NCCL loaded first. Keep GPU
@@ -129,7 +129,40 @@ class _JaxWithoutDriver:
         return None
 
 
+def _private_compile_caches():
+    """torch.compile caches the code it generates, and runs it again on a later
+    cache hit, in /tmp/torchinductor_<user>; its vendored CuTe kernels (quack)
+    cache in /tmp/<user>. Any account can create those folders first, after
+    every reboot empties /tmp, and then swap the cached code: on M2 nobody's
+    code ran as ubuntu that way (finding 83). This puts both caches in the
+    user's own ~/.cache, which other accounts can't reach.
+
+    Parts of PyTorch (precompiled C++ headers, its newer on-disk caches) build
+    the /tmp/torchinductor_<user> path themselves, whatever the setting says,
+    from Python's temp folder. So Python processes also get a private temp
+    folder, ~/.cache/tmp (TMPDIR), which closes every such predictable path at
+    once; tempfile cleans up after itself as before.
+
+    Settings the user made win, and an account without a writable home keeps
+    the defaults. Environment variables only: torch isn't imported here."""
+    home = os.path.expanduser("~")
+    if not os.path.isdir(home) or not os.access(home, os.W_OK):
+        return
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", os.path.join(base, "torchinductor"))
+    os.environ.setdefault("QUACK_CACHE_DIR", os.path.join(base, "torch_vendor_quack"))
+    if "TMPDIR" not in os.environ:
+        tmp = os.path.join(base, "tmp")
+        try:
+            os.makedirs(tmp, mode=0o700, exist_ok=True)
+        except OSError:
+            return
+        if os.path.isdir(tmp) and not os.path.islink(tmp) and os.stat(tmp).st_uid == os.getuid():
+            os.environ["TMPDIR"] = tmp
+
+
 sys.meta_path.insert(0, _JaxWithoutDriver())
+_private_compile_caches()
 
 if os.path.isdir(_TF_CUDA):
     sys.meta_path.insert(0, _PreloadForTensorFlow())

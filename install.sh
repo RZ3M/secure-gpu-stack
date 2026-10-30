@@ -22,6 +22,10 @@
 set -euo pipefail
 # apt translates the output this script parses ("Candidate:", ...).
 export LC_ALL=C.UTF-8
+# What this creates must be readable by every account. sudo keeps the admin's
+# umask: under 077, /opt/sgs/venv came out root-only and the stack worked for
+# no one else, while the install reported success (M2 finding 84).
+umask 022
 
 SGS_VERSION="0.1.1"
 SGS_PREFIX="/opt/sgs"
@@ -176,12 +180,13 @@ preflight() {
   # R580 still drives pre-Turing GPUs (Maxwell, Pascal, Volta), but CUDA 13
   # dropped them, so the CUDA 13 builds of PyTorch and JAX have no code for
   # them. TensorFlow's CUDA 12 build still covers Pascal and Volta, except for
-  # convolutions: cuDNN 9.27 has no kernels for them (tested on krabs, a GTX
-  # 1070). Lambda serves its V100s with a separate "Legacy" image for this reason.
+  # convolutions on Pascal: cuDNN 9.27 has no kernels for it (tested on krabs, a
+  # GTX 1070; Volta is untested). Lambda serves its V100s with a separate
+  # "Legacy" image.
   if [ "$DRIVER_VARIANT" = server ]; then
     info "Note: this GPU predates Turing (2018). The driver, nvidia-smi and GPU"
     info "containers work. PyTorch and JAX (CUDA 13) can't use it and run on the"
-    info "CPU; TensorFlow (CUDA 12) can, except for convolutions."
+    info "CPU; TensorFlow (CUDA 12) can, except for convolutions on Pascal."
   fi
 }
 
@@ -644,7 +649,9 @@ make_venv() {
     rm -rf "$dir"; mv "$dir.old" "$dir"
   fi
   rm -rf "$dir.old"
-  [ "$(cat "$dir/.sgs-lock-sha256" 2>/dev/null)" = "$sum" ] && return 0
+  # Up to date: only make sure every account can still read it (an earlier run
+  # under a strict umask left it root-only, M2 finding 84).
+  if [ "$(cat "$dir/.sgs-lock-sha256" 2>/dev/null)" = "$sum" ]; then chmod -R a+rX "$dir"; return 0; fi
   if [ -e "$dir" ]; then mv "$dir" "$dir.old"; fi
   if [ "$kind" = target ]; then
     "$SGS_PREFIX/venv/bin/python" -m pip install --target "$dir" "${opts[@]}" || ok=0
@@ -659,7 +666,7 @@ make_venv() {
   echo "$sum" > "$dir/.sgs-lock-sha256"
   rm -rf "$dir.old"
   chown -R root:root "$dir"
-  chmod -R go-w "$dir"
+  chmod -R go-w,a+rX "$dir"
 }
 
 install_python() {

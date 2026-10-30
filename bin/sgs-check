@@ -76,6 +76,11 @@ STARTUP_HOME=".ssh/authorized_keys .ssh/authorized_keys2 .ssh/rc .ssh/environmen
   .ipython/profile_default/startup/*.ipy .jupyter/*.py .jupyter/*.json .local/share/jupyter/kernels/ .config/systemd/user/
   .local/share/systemd/user/ .config/autostart/ .config/environment.d/ .local/bin/"
 STARTUP_RECORD=/var/lib/sgs/startup-files
+# Places that replaced an older, wider one, as "new=old". Files the old place
+# covered aren't newly watched: a change waiting for review stays reported
+# instead of being accepted as part of a "new place" on upgrade (M2 review).
+STARTUP_RENAMED="~/.ipython/profile_default/startup/*.py=~/.ipython/profile_default/startup/
+  ~/.ipython/profile_default/startup/*.ipy=~/.ipython/profile_default/startup/"
 # A fingerprint line: hash, the watched place it's under, path. A symlink
 # counts as its target plus that target's contents, so swapping a file for a
 # link shows as a change. A newline in a name would split the line: it's
@@ -135,24 +140,31 @@ startup_files() {
 # Compare the record with now: "C path" new or changed, "G path" gone, and
 # "P place" for a place this version watches that the record didn't.
 startup_compare() {
-  awk '
+  awk -v renamed="$STARTUP_RENAMED" '
+    BEGIN { n = split(renamed, rn, /[ \n]+/); for (i = 1; i <= n; i++) if (split(rn[i], kv, "=") == 2) pred[kv[1]] = kv[2] }
     FNR == 1 { f++ }
     /^place / { w = substr($0, 7); if (f == 1) old[w] = 1; else cur[w] = 1; next }
     { p = $0; sub(/^[^ ]+ [^ ]+ /, "", p) }
     f == 1 { rec[p] = $0; recw[p] = $2; next }
     { now[p] = $0; noww[p] = $2 }
     END {
-      for (w in cur) if (!(w in old)) { print "P " w; fresh[w] = 1 }
-      for (p in now) if (!(noww[p] in fresh) && rec[p] != now[p]) print "C " p
+      for (w in cur) if (!(w in old) && !((w in pred) && (pred[w] in old))) { print "P " w; fresh[w] = 1 }
+      # A file recorded under the place this one replaced compares by content.
+      for (p in now) {
+        if (noww[p] in fresh) continue
+        if ((p in rec) && recw[p] != noww[p]) { split(rec[p], r, " "); if (r[1] " " noww[p] " " p != now[p]) print "C " p; continue }
+        if (rec[p] != now[p]) print "C " p
+      }
       for (p in rec) if (!(p in now) && (recw[p] in cur)) print "G " p
     }' "$1" "$2" | sort
 }
 # The record after a run of install.sh or sgs-egress: what it changed (between
-# the list in $1 and now) and places the record didn't watch are accepted;
-# anything else stays as last accepted, so a change waiting for review stays
-# reported.
+# the list in $1 and now) and places the record didn't watch are accepted (a
+# place that replaced an older one, STARTUP_RENAMED, isn't new); anything else
+# stays as last accepted, so a change waiting for review stays reported.
 startup_accept_since() {
-  awk '
+  awk -v renamed="$STARTUP_RENAMED" '
+    BEGIN { n = split(renamed, rn, /[ \n]+/); for (i = 1; i <= n; i++) if (split(rn[i], kv, "=") == 2) pred[kv[1]] = kv[2] }
     FNR == 1 { f++ }
     /^place / { w = substr($0, 7); if (f == 2) old[w] = 1; if (f == 3) cur[w] = 1; next }
     { p = $0; sub(/^[^ ]+ [^ ]+ /, "", p) }
@@ -163,8 +175,10 @@ startup_accept_since() {
       for (w in cur) print "place " w
       for (p in now) {
         before = (p in pre) ? pre[p] : ""
-        if (before != now[p] || !(noww[p] in old)) print now[p]
-        else if (p in rec) print rec[p]
+        known = (noww[p] in old) || ((noww[p] in pred) && (pred[noww[p]] in old))
+        if (before != now[p] || !known) print now[p]
+        # Recorded under the place this one replaced: keep the reviewed content.
+        else if (p in rec) { split(rec[p], r, " "); print r[1] " " noww[p] " " p }
       }
       for (p in rec) if (!(p in now) && !(p in pre) && (recw[p] in cur)) print rec[p]
     }' "$1" "$STARTUP_RECORD" "$2" | sort
@@ -663,6 +677,46 @@ EOF
     bad "Users can modify the stack's packages ($SITE)"
   else
     ok "Stack packages are read-only for users"
+  fi
+  # Read-only isn't enough: every account must be able to use it. Installed
+  # under an admin's umask of 077, /opt/sgs/venv was root-only and the check
+  # above still passed (M2 finding 85).
+  frameworks=""
+  for m in torch tensorflow jax; do case " $versions " in *" $m "*) frameworks="$frameworks $m" ;; esac; done
+  if [ -n "$frameworks" ]; then
+    # shellcheck disable=SC2086
+    if runuser -u nobody -- "$PY" -I -c 'import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(m) for m in sys.argv[1:]) else 1)' $frameworks 2>/dev/null; then
+      ok "Any account can use the stack (nobody found$frameworks)"
+    else
+      bad "Other accounts can't use the stack: nobody couldn't load$frameworks from $PY (an install under a strict umask? sudo chmod -R a+rX /opt/sgs)"
+    fi
+  fi
+  # torch.compile keeps the code it generates, and runs it again later, in
+  # /tmp/torchinductor_<user>. Any account can make that folder first and then
+  # swap the code: nobody's code ran as ubuntu on M2 (finding 83). The stack's
+  # startup hook moves the caches into ~/.cache; check it does, and look for
+  # cache folders in /tmp that belong to someone other than their user.
+  if case " $versions " in *" torch "*) true ;; *) false ;; esac; then
+    if [ "$PY" = /opt/sgs/venv/bin/python ]; then
+      cache_home=$(mktemp -d); chown nobody "$cache_home"
+      got=$(runuser -u nobody -- env -u XDG_CACHE_HOME -u TORCHINDUCTOR_CACHE_DIR -u QUACK_CACHE_DIR -u TMPDIR HOME="$cache_home" "$PY" -I -c 'import os, tempfile; print(os.environ.get("TORCHINDUCTOR_CACHE_DIR", ""), os.environ.get("QUACK_CACHE_DIR", ""), tempfile.gettempdir())' 2>/dev/null)
+      want="$cache_home/.cache/torchinductor $cache_home/.cache/torch_vendor_quack $cache_home/.cache/tmp"
+      rm -rf "$cache_home"
+      [ "$got" = "$want" ] && ok "torch.compile keeps its generated code, and Python its temp files, in each user's own ~/.cache, not in /tmp" \
+                           || bad "torch.compile's code caches and Python's temp folder aren't moved out of /tmp (the startup hook didn't set TORCHINDUCTOR_CACHE_DIR, QUACK_CACHE_DIR and TMPDIR)"
+    else
+      bad "torch.compile keeps its generated code in /tmp/torchinductor_<user>, where any account can plant it first (set TORCHINDUCTOR_CACHE_DIR to a folder in your home)"
+    fi
+    planted=""
+    for d in /tmp/torchinductor_* /var/tmp/torchinductor_*; do
+      [ -d "$d" ] || continue
+      [ "$(stat -c %U "$d")" = "${d##*/torchinductor_}" ] || planted="$planted $d"
+    done
+    for d in /tmp/*/torch_vendor_quack_cache; do
+      [ -d "$d" ] || continue
+      u=$(dirname "$d"); [ "$(stat -c %U "$u")" = "${u##*/}" ] || planted="$planted $u"
+    done
+    [ -z "$planted" ] || bad "torch.compile cache folders in /tmp that belong to someone other than the user they're named for (planted?):$planted"
   fi
   # The login profile puts the first two first on everyone's PATH, root's
   # included; the tools (pip-audit, modelscan) and TensorFlow's CUDA libraries
@@ -1382,9 +1436,10 @@ version = tuple(int(p) for p in cc.split(".")) if cc else None
 too_old = bool(version) and version < need
 # Convolutions go through cuDNN, which a matmul never touches: on M2 a
 # TensorFlow that mixed two cuDNN builds multiplied matrices fine and failed
-# every convolution. cuDNN 9.27 has no convolution kernels before Turing (7.5),
-# so there a failed TensorFlow convolution is expected (krabs, a GTX 1070).
-conv_too_old = bool(version) and version < (7, 5)
+# every convolution. cuDNN 9.27 has no convolution kernels for Pascal, so there
+# a failed TensorFlow convolution is expected (krabs, a GTX 1070). Volta (7.0)
+# is untested, so a failure there stays a WARN.
+conv_too_old = bool(version) and version < (7, 0)
 name = {"torch": "PyTorch", "jax": "JAX", "tensorflow": "TensorFlow"}[fw]
 N = 4096
 conv_err = None
@@ -1446,7 +1501,7 @@ except Exception as e:
 if on_gpu and conv_err is None:
     print(f"PASS|{name}: {detail}, convolution OK")
 elif on_gpu and conv_too_old:
-    print(f"SKIP|{name}: {detail}, but convolutions can't run on this GPU (compute capability {cc}; cuDNN 9.27 needs 7.5+)")
+    print(f"SKIP|{name}: {detail}, but convolutions can't run on this GPU (compute capability {cc}; cuDNN 9.27 has none for Pascal)")
 elif on_gpu:
     print(f"WARN|{name} matrix multiply works ({detail}) but a convolution failed: {conv_err}")
 elif too_old:

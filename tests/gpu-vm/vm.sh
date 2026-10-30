@@ -47,7 +47,7 @@ start() {
   fwd="hostfwd=tcp:$addr:2222-:22"
   for p in $PORTS; do fwd+=",hostfwd=tcp:$addr:$p-:$p"; done
   if [ "$gpu" = --gpu ]; then
-    g=$(lspci -D -d 10de: | awk '/VGA compatible|3D controller/ { print $1; exit }')
+    g="${SGS_GPU:-$(lspci -D -d 10de: | awk '/VGA compatible|3D controller/ { print $1; exit }')}"
     # Behind a PCIe root port, as on a real machine; the GPU and its audio
     # stay one multi-function device.
     devs=(-device pcie-root-port,id=gpu-port,bus=pcie.0,chassis=1,slot=1)

@@ -341,6 +341,24 @@ TensorFlow and JAX in the system Python. Options:
   request); the version without the voice stays in `video/m2/out/`. The
   summary page (https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM) is at
   version 3, with a "What's new in v0.1.1" section that links the video.
+- [x] License (2026-10-29): AGPL-3.0-or-later, `LICENSE` from gnu.org,
+  copyright "RZ3M"; release tarballs ship it. Committed and pushed.
+- [x] M2 hill-climb, rounds AB–AF (2026-10-29), stopped after three thin
+  rounds (AD, AE, AF) by the user's rule; written up in
+  `docs/m2-test-bench.md`. Not committed. Findings 82–85:
+  - 82: an upgrade could silently accept a pending IPython startup file
+    (`STARTUP_RENAMED`).
+  - 83: `torch.compile`'s cache in `/tmp/torchinductor_<user>` let any account
+    run code as the user (measured: nobody → uid 1000). The startup hook sets
+    `TORCHINDUCTOR_CACHE_DIR`, `QUACK_CACHE_DIR` and a private `TMPDIR`
+    (`~/.cache/tmp`); `sgs-check` tests the hook and flags planted folders.
+  - 84: installs under a strict umask made the stack root-only; the
+    installer sets umask 022 and repairs modes on every run.
+  - 85: `sgs-check` now requires `nobody` to load the frameworks.
+  Declined, to keep features: a login umask of 027 (breaks non-root Docker
+  images), wheels-only `sgs-venv`. Final: VM 58 PASS / 0 WARN on the RTX
+  3080, also with `--no-cuda-toolkit`; GPU containers work. M2's VMs
+  `a`–`e` are stopped, disks kept (122 GB in `~/sgs-vm`).
 - [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: Lambda's cloud
   image, data-center GPUs, multi-GPU NCCL. This is waiting for the user to
   provide a Lambda environment.

@@ -97,8 +97,10 @@ card and the same driver:
 | GPU device files | Open to every account: `nobody` ran `nvidia-smi` | Video group only, locked |
 | Training speed (ResNet-50, GPT-style) | 902 images/s, 63,465 tokens/s | 919 images/s, 63,948 tokens/s |
 
-M2 also found five more bugs and blind spots, all fixed, among them
-TensorFlow convolutions that failed on any GPU new enough to run them; see
+M2 also found nine more bugs and blind spots, all fixed, among them
+TensorFlow convolutions that failed on any GPU new enough to run them, and
+a way for any other account to get its code run as you through
+`torch.compile`'s cache in `/tmp`; see
 [docs/m2-test-bench.md](docs/m2-test-bench.md).
 
 Full output is in `tests/results/`. Lambda's cloud image, data-center GPUs

@@ -17,7 +17,7 @@ STAGE="$(mktemp -d)"
 
 mkdir -p "$DIST" "$STAGE/$NAME/tests"
 cp -R "$ROOT"/{install.sh,bin,files,python,docs,README.md,LICENSE} "$STAGE/$NAME/"
-cp "$ROOT"/tests/{user-checks.sh,attack-demo.sh} "$STAGE/$NAME/tests/"
+cp "$ROOT"/tests/{user-checks.sh,attack-demo.sh,compile-cache-attack.sh} "$STAGE/$NAME/tests/"
 # Files are recorded as root's, so extracting as root doesn't hand them to
 # whoever has the build machine's uid (1000 is "ubuntu" on Lambda). GNU tar
 # (Linux) and bsdtar (macOS) spell that differently.

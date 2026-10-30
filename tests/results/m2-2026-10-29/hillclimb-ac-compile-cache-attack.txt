@@ -1,0 +1,5 @@
+== tests/compile-cache-attack.sh on VM B (no GPU), after round AC
+== as shipped
+SAFE: torch.compile wrote nothing into the folder nobody made (its cache is elsewhere)
+== positive control: TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_ubuntu (PyTorch default)
+VULNERABLE: nobody's code ran as ubuntu: uid=1000

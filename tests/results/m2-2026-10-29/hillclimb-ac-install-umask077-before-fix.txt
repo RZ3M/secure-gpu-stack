@@ -1,0 +1,21 @@
+install exit 0
+==> Secure GPU Stack 0.1.1 is installed
+    Check it:   sgs-check
+    Reboot to finish (the NVIDIA driver, kernel lockdown and their settings load at boot):   sudo reboot
+drwxr-xr-x 5 root root 4096 Oct 30 00:18 /opt/sgs
+drwx------ 7 root root 4096 Oct 30 00:16 /opt/sgs/venv
+ls: cannot access '/opt/sgs/venv/lib/python3.12/site-packages/torch': Permission denied
+  [FAIL] python3 is /usr/bin/python3
+  [FAIL] framework imports failed
+  [PASS] nvcc: release 13.0
+  [PASS] the stack's packages and commands are read-only for a normal user
+  [FAIL] sgs-venv: got ''
+  [FAIL] JupyterLab on /run/sgs-jupyter/ubuntu/jupyter.sock: HTTP 000 with the token, 000 without (want 200, 403)
+  [PASS] nothing answers on localhost:8888, where any account could reach it
+  [PASS] JupyterLab doesn't answer on the network address (10.0.2.15)
+  [FAIL] modelscan didn't flag the booby-trapped model.pt
+  [FAIL] modelscan didn't flag the booby-trapped model.pkl
+  [FAIL] torch.load failed for another reason: ModuleNotFoundError: No module named 'torch'
+== 7 user check(s) failed
+
+[exited with code 0]

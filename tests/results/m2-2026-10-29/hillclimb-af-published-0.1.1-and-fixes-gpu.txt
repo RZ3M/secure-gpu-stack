@@ -1,0 +1,30 @@
+== 1. published v0.1.1: sgs-check --gpu-test
+     [PASS] The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)
+   == GPU test
+     [PASS] PyTorch 2.15.0+cu132: 24.1 TFLOP/s (fp32 matmul) on NVIDIA GeForce RTX 3080, convolution OK
+     [PASS] JAX 0.12.0.1: 31.7 TFLOP/s (fp32 matmul) on gpu, convolution OK
+     [PASS] TensorFlow 2.21.0: 17.2 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+   == Result: 56 PASS, 0 WARN, 0 SKIP
+== 2. upgrade to the working tree
+  PASS  installer exit 0
+== 3. torch.compile on the GPU, with nobody's planted cache folder
+  compiled on NVIDIA GeForce RTX 3080 sum 1790933.375
+  PASS  nothing in nobody's planted folder
+  PASS  Triton kernels cached privately (16 files under ~/.cache/torchinductor)
+== 4. sgs-check --gpu-test after the upgrade
+     [PASS] Any account can use the stack (nobody found torch tensorflow jax)
+     [PASS] torch.compile keeps its generated code, and Python its temp files, in each user's own ~/.cache, not in /tmp
+   == Result: 58 PASS, 0 WARN, 0 SKIP
+== 5. GPU containers
+  PASS  images pulled
+  PASS  --gpus all: GPU 0: NVIDIA GeForce RTX 3080 (UUID: GPU-8e9b88ee-99cc-2b2d-5ec6-42a0d893407c)
+  PASS  CDI --device nvidia.com/gpu=all: GPU 0: NVIDIA GeForce RTX 3080 (UUID: GPU-8e9b88ee-99cc-2b2d-5ec6-42a0d893407c)
+  PASS  NVIDIA_VISIBLE_DEVICES=all without --gpus gets no GPU
+  PASS  no-new-privileges in GPU containers (NoNewPrivs:	1)
+  PASS  torch 2.15.0+cu132 in a container on NVIDIA GeForce RTX 3080 sum True
+== 6. the smoke test, all three frameworks
+   torch: PASS torch
+   jax: PASS jax
+   tf: PASS tf
+
+[exited with code 0]

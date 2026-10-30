@@ -59,6 +59,14 @@ where it's explained and where it was tested. "Finding N" refers to
 - **What a job leaves behind:** files in `/dev/shm`, swap, core dumps and
   caches (`~/.cache`, Triton's) can hold data or tokens after it ends. The
   stack doesn't clean them up.
+- **Files you write to `/tmp` from an SSH session.** Ubuntu's login umask
+  (0002) leaves them readable by every account. The stack keeps its own
+  temp files and `torch.compile`'s generated code in your home instead, and
+  notebooks write with umask 077, but a stricter login umask would stop
+  Docker images that run as a non-root user from reading files built into
+  them, so it's left as Ubuntu sets it ([M2 round AC](m2-test-bench.md)).
+  Keep checkpoints and data in your home folder, which other accounts can't
+  open.
 - **Persistence:** code that runs as you can add a cron job, a user systemd
   unit, a line in your shell's startup files, an IPython startup script
   that runs in every notebook kernel, or an SSH key, and come back after a

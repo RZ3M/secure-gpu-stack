@@ -1,0 +1,14 @@
+d shut down
+Created e (127.0.0.6)
+Started e with the GPU; console: /home/remote/sgs-vm/e-console.log
+install exit 0
+==> Skipping the CUDA toolkit (--no-cuda-toolkit)
+ls: cannot access '/usr/local/cuda/bin/ptxas': No such file or directory
+GPU 0: NVIDIA GeForce RTX 3080 (UUID: GPU-8e9b88ee-99cc-2b2d-5ec6-42a0d893407c)
+conv2d GPU vs CPU max abs diff 1.41e-04
+keras fit ok, loss 2.305
+PASS tf
+  [PASS] TensorFlow 2.21.0: 17.0 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+== Result: 58 PASS, 0 WARN, 0 SKIP
+
+[exited with code 0]

@@ -27,3 +27,8 @@ video/m2/out/*.mp4
 # Python bytecode
 __pycache__/
 *.pyc
+
+# The M2 test bench keeps its VM disks, the cloud image and the VMs' SSH key
+# next to its scripts (tests/gpu-vm/vm.sh).
+tests/gpu-vm/*
+!tests/gpu-vm/*.sh
