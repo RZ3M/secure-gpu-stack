@@ -340,12 +340,15 @@ TensorFlow and JAX in the system Python. Options:
   The voiced MP4 is an asset of the v0.1.1 release (uploaded at the user's
   request); the version without the voice stays in `video/m2/out/`. The
   summary page (https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM) is at
-  version 3, with a "What's new in v0.1.1" section that links the video.
+  version 4: a "What's new in v0.1.1" section that links the video, and
+  findings 82–85 from the rounds after it. Its source is rebuilt from the
+  published page (Artifact read), not kept in the repo.
 - [x] License (2026-10-29): AGPL-3.0-or-later, `LICENSE` from gnu.org,
   copyright "RZ3M"; release tarballs ship it. Committed and pushed.
 - [x] M2 hill-climb, rounds AB–AF (2026-10-29), stopped after three thin
   rounds (AD, AE, AF) by the user's rule; written up in
-  `docs/m2-test-bench.md`. Not committed. Findings 82–85:
+  `docs/m2-test-bench.md`. Committed and pushed (8048669), not yet in a
+  release. Findings 82–85:
   - 82: an upgrade could silently accept a pending IPython startup file
     (`STARTUP_RENAMED`).
   - 83: `torch.compile`'s cache in `/tmp/torchinductor_<user>` let any account
