@@ -187,3 +187,15 @@ To test locally without a GPU, run `tests/test-local.sh`. It needs Multipass.
   the code; their findings are checked on the test bench before anything changes.
 - `cloud-init/`: first-boot setup for Lambda Cloud.
 - `exercise-01/`: the learning exercise this project grew from.
+
+## License
+
+Copyright (C) 2026 RZ3M.
+
+Secure GPU Stack is free software under the
+[GNU Affero General Public License, version 3](LICENSE), or (at your option)
+any later version. Anyone may use, study, change and share it. Anyone who
+distributes it, changed or not, must pass it on under the same license with
+its source code, and anyone who changes it and lets others use it over a
+network must offer those users the changed source too (section 13). It comes
+with no warranty.
