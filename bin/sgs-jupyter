@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # sgs-jupyter: show how to reach this machine's JupyterLab.
 #
+#   sgs-jupyter            the SSH tunnel command, the URL and the login token
+#   sgs-jupyter --rotate   replace the token (needs sudo; restarts JupyterLab,
+#                          which stops running notebooks)
+#
 # JupyterLab listens on a Unix socket only you can open, not on a network or
 # localhost port, so nobody on the internet and no other account on this
 # machine can reach it. You connect through an SSH tunnel from your own
@@ -8,36 +12,66 @@
 set -euo pipefail
 
 user="$(id -un)"
+# The token is in a file only you can read. The service makes a new one when
+# the file is gone, so rotating is: delete it, restart.
+tokfile="$HOME/.local/share/jupyter/sgs-token"
+
+if [ "${1:-}" = --rotate ]; then
+  echo "This restarts JupyterLab: running notebooks stop, and every browser"
+  echo "logged in with the old token is logged out."
+  # sudo first: a cancelled password prompt mustn't leave the token deleted
+  # while the server still runs with it. Not `sudo -v`: it wants a password
+  # unless every sudoers entry is NOPASSWD, and Lambda's passwordless ubuntu
+  # also matches %sudo.
+  sudo -n true 2>/dev/null || sudo true || exit 1
+  rm -f "$tokfile"
+  sudo systemctl restart "sgs-jupyter@${user}"
+  echo "New token in place. Run sgs-jupyter to see it."
+  exit 0
+elif [ -n "${1:-}" ]; then
+  sed -n '2,11p' "$0"; exit 2
+fi
+
 if ! systemctl is-active --quiet "sgs-jupyter@${user}"; then
   echo "JupyterLab isn't running for ${user}. Start it with:"
   echo "  sudo systemctl enable --now sgs-jupyter@${user}"
   exit 1
 fi
 
-# The token is in a file only you can read; delete it and restart the service
-# to get a new one.
 sock="/run/sgs-jupyter/${user}/jupyter.sock"
-tokfile="$HOME/.local/share/jupyter/sgs-token"
-# The address other machines use (the default route's source), not a Docker bridge.
+# The address other machines use (the default route's source), not a Docker
+# bridge. Behind a cloud's NAT that's a private address nobody outside can
+# reach: Lambda's instances only see 10.x, but name themselves after their
+# public address (150-136-35-202), so use that when there is one.
 addr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1) }')"
-[ -n "$addr" ] || addr="<this-machine's-IP>"
-if [ -r "$tokfile" ]; then
-  url="http://localhost:8888/lab?token=$(cat "$tokfile")"
-else
-  url="http://localhost:8888/lab  (token: in ${tokfile})"
+private() { echo "$1" | grep -qE '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)'; }
+named="$(hostname | sed -n 's/^\([0-9]\{1,3\}\)-\([0-9]\{1,3\}\)-\([0-9]\{1,3\}\)-\([0-9]\{1,3\}\)$/\1.\2.\3.\4/p')"
+if [ -n "$named" ] && ! private "$named" && { [ -z "$addr" ] || private "$addr"; }; then
+  addr="$named"
 fi
+[ -n "$addr" ] || addr="<the-address-you-ssh-to>"
+# The token goes in the login page, not the URL: a URL with ?token= ends up in
+# browser history, and in any proxy's logs (Lambda Stack's public Jupyter took
+# its token in the URL, over plain HTTP).
+token="(in ${tokfile})"
+[ -r "$tokfile" ] && token="$(cat "$tokfile")"
 
 cat <<EOF
 JupyterLab is running on this machine, on a private socket: ${sock}
 
-1. On your own computer, open the tunnel (leave it running):
+1. On your own computer, open the tunnel (leave it running), with the
+   address you SSH to if it isn't this one:
      ssh -N -L 8888:${sock} ${user}@${addr}
 
 2. Then open this in your browser:
-     ${url}
+     http://localhost:8888/lab
 
-A Jupyter client on your computer (VS Code, say) uses the same URL while the
-tunnel is open. PuTTY can't forward to a socket: use Windows' own ssh, or WSL.
-With VS Code Remote-SSH you don't need this server: pick the stack's Python,
-/opt/sgs/venv/bin/python, as the kernel.
+3. On the login page, paste this token (it stays the same until you run
+   sgs-jupyter --rotate):
+     ${token}
+
+A Jupyter client on your computer (VS Code, say) asks for the URL and the
+token the same way while the tunnel is open. PuTTY can't forward to a socket:
+use Windows' own ssh, or WSL. With VS Code Remote-SSH you don't need this
+server: pick the stack's Python, /opt/sgs/venv/bin/python, as the kernel.
 EOF

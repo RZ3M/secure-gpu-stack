@@ -1,0 +1,8 @@
+== torch.compile cache attack
+== 1. nobody creates /tmp/torchinductor_ubuntu first
+== 2. ubuntu compiles
+SAFE: torch.compile wrote nothing into the folder nobody made (its cache is elsewhere)
+== GPU memory between users
+wrote 72448 MB of marker (81151 MB GPU)
+read 72448 MB fresh: marker found 0 times; non-zero bytes 0
+id: ‘sgsmem’: no such user

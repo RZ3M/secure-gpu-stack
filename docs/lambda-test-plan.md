@@ -1,5 +1,14 @@
 # Test plan for a real Lambda environment
 
+> **Status, 2026-10-30:** run on two single-GPU A100 instances. Instance B
+> (Secure GPU Stack) is written up in `docs/lambda-test-bench.md`, instance A
+> (Lambda Stack) in `docs/lambda-instance-audit.md`. Everything below that
+> one GPU can show passed, after findings 86–90 were fixed. Still open: the
+> multi-GPU items (NCCL across GPUs, NVSwitch and Fabric Manager, InfiniBand)
+> and the cloud-init route (needs an API key). The release is now 0.1.2;
+> substitute it for 0.1.1 in the commands below. Lambda's firewall blocks
+> the attack demo's Docker-port control, so that part SKIPs on Lambda.
+
 What the local VMs couldn't test: the NVIDIA driver install, the GPU itself,
 x86-64, Lambda Cloud's own default image, and performance. This plan needs two
 instances of the same GPU type. A single-GPU instance is enough; budget about

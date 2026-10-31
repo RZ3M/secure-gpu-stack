@@ -27,7 +27,7 @@ export LC_ALL=C.UTF-8
 # no one else, while the install reported success (M2 finding 84).
 umask 022
 
-SGS_VERSION="0.1.1"
+SGS_VERSION="0.1.2"
 SGS_PREFIX="/opt/sgs"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -134,7 +134,8 @@ preflight() {
            files/sgs_cuda_preload.py files/sgs-cuda-preload.pth files/sysctl-60-sgs.conf \
            files/modprobe-sgs-nvidia.conf files/docker-daemon.json files/sshd-10-sgs.conf files/profile-sgs.sh \
            files/motd-60-sgs files/sgs-check.service files/sgs-check.timer files/sgs-jupyter@.service files/sgs-gpu-devices files/72-sgs-nvidia-devices.rules files/nvidia-cdi-refresh-sgs.conf \
-           files/sgs-gpu-devices.service files/nvidia-persistenced-sgs.conf files/ub-device-create; do
+           files/sgs-gpu-devices.service files/nvidia-persistenced-sgs.conf files/nvidia-persistenced-sgs-persistence.conf \
+           files/73-sgs-rdma-devices.rules files/ub-device-create; do
     [ -f "$SRC_DIR/$f" ] || die "Missing $f next to install.sh. Run it from an unpacked release."
   done
 
@@ -265,10 +266,13 @@ harden() {
   # Turn off password logins only if someone can still get in with a key, so
   # this can't lock the owner out. If the SSH server is new here, nobody can be
   # relying on its password logins, so it starts keys-only either way.
+  # A key that still works counts: the config drops RSA keys under 2048 bits.
   local keys="" home
   if [ -n "$TARGET_USER" ]; then
     home="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-    [ -s "$home/.ssh/authorized_keys" ] && keys=1
+    [ -s "$home/.ssh/authorized_keys" ] \
+      && ssh-keygen -lf "$home/.ssh/authorized_keys" 2>/dev/null | awk '$NF != "(RSA)" || $1 >= 2048 { f = 1 } END { exit !f }' \
+      && keys=1
   fi
   if [ -n "$keys" ] || [ -z "$had_sshd" ]; then
     install -m 0644 "$SRC_DIR/files/sshd-10-sgs.conf" /etc/ssh/sshd_config.d/10-sgs.conf
@@ -470,9 +474,29 @@ install_driver() {
   install -d -m 0755 /etc/systemd/system/nvidia-cdi-refresh.service.d /etc/systemd/system/nvidia-persistenced.service.d
   install -m 0644 "$SRC_DIR/files/nvidia-cdi-refresh-sgs.conf" /etc/systemd/system/nvidia-cdi-refresh.service.d/sgs-gpu-devices.conf
   install -m 0644 "$SRC_DIR/files/nvidia-persistenced-sgs.conf" /etc/systemd/system/nvidia-persistenced.service.d/sgs-gpu-devices.conf
+  # Persistence mode, except on laptops, where it would keep the GPU awake.
+  # The machine's own battery, not a wireless mouse's (scope Device).
+  local laptop="" ps
+  for ps in /sys/class/power_supply/*; do
+    if [ "$(cat "$ps/type" 2>/dev/null)" = Battery ] && [ "$(cat "$ps/scope" 2>/dev/null || echo System)" != Device ]; then
+      laptop=1
+    fi
+  done
+  if [ -n "$laptop" ]; then
+    rm -f /etc/systemd/system/nvidia-persistenced.service.d/sgs-persistence.conf
+  else
+    install -m 0644 "$SRC_DIR/files/nvidia-persistenced-sgs-persistence.conf" /etc/systemd/system/nvidia-persistenced.service.d/sgs-persistence.conf
+  fi
   systemctl daemon-reload
   install -m 0644 "$SRC_DIR/files/72-sgs-nvidia-devices.rules" /etc/udev/rules.d/72-sgs-nvidia-devices.rules
+  install -m 0644 "$SRC_DIR/files/73-sgs-rdma-devices.rules" /etc/udev/rules.d/73-sgs-rdma-devices.rules
   udevadm control --reload-rules >/dev/null 2>&1 || true
+  # RDMA files that exist already (a re-run, or an InfiniBand machine) get
+  # the rule now, not at the next boot.
+  if [ -d /dev/infiniband ] || [ -e /dev/knem ] || [ -e /dev/xpmem ]; then
+    udevadm trigger --subsystem-match=infiniband_verbs >/dev/null 2>&1 || true
+    udevadm trigger --sysname-match=rdma_cm --sysname-match=knem --sysname-match=xpmem >/dev/null 2>&1 || true
+  fi
   /usr/local/sbin/sgs-gpu-devices || die "Couldn't limit the GPU device files to the video group"
   [ -z "$TARGET_USER" ] || usermod -aG video "$TARGET_USER"
   # Restart the persistence daemon with the video group (its drop-in).
@@ -747,9 +771,15 @@ install_commands() {
 
 # Record changes to what decides what this machine trusts and runs: package
 # sources, sudo, SSH, Docker and the GPU container hooks, kernel settings, the
-# stack itself, and kernel module loading. /dev/nvidia* and /var/lib/docker are
-# left out: every CUDA program and image pull would flood the log. Only paths
-# that exist are watched, because a missing one stops auditd loading the rest.
+# stack itself, kernel module loading, accounts and their passwords, PAM,
+# root's SSH keys, and where code makes itself permanent (services, cron,
+# preloaded libraries). Every command root runs for a user is left out: one
+# `sudo apt upgrade` would push the rest out of the rotating log. /dev/nvidia* and /var/lib/docker are
+# left out: every CUDA program and image pull would flood the log. A path that
+# doesn't exist yet is still watched (the kernel watches its folder, so its
+# creation is recorded: /var/run/cdi only appears at boot, /etc/cdi maybe
+# never), but only if its folder exists: a missing folder stops auditd loading
+# the rest.
 install_audit_rules() {
   if [ "$WITH_HARDENING" != 1 ]; then log "Skipping audit rules (--no-hardening)"; return 0; fi
   command -v augenrules >/dev/null || return 0
@@ -773,9 +803,13 @@ install_audit_rules() {
                  /etc/modprobe.d/:sgs-kernel \
                  /etc/sysctl.d/:sgs-kernel /etc/profile.d/:sgs-profile \
                  "$site/sgs-cuda-preload.pth":sgs-stack "$site/sgs_cuda_preload.py":sgs-stack \
-                 /usr/local/bin/sgs-check:sgs-stack /etc/systemd/system/sgs-jupyter@.service:sgs-stack; do
+                 /usr/local/bin/sgs-check:sgs-stack /etc/systemd/system/sgs-jupyter@.service:sgs-stack \
+                 /etc/passwd:sgs-identity /etc/shadow:sgs-identity /etc/group:sgs-identity /etc/gshadow:sgs-identity \
+                 /etc/pam.d/:sgs-identity /root/.ssh/:sgs-identity /etc/systemd/system/:sgs-persist \
+                 /etc/crontab:sgs-persist /etc/cron.d/:sgs-persist /var/spool/cron/:sgs-persist \
+                 /etc/ld.so.preload:sgs-persist; do
       path="${entry%:*}"
-      if [ -e "$path" ]; then echo "-w $path -p wa -k ${entry##*:}"; fi
+      if [ -e "$path" ] || [ -d "$(dirname "${path%/}")" ]; then echo "-w $path -p wa -k ${entry##*:}"; fi
     done
     echo "-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k sgs-kernel"
   } > "$rules"
@@ -801,10 +835,11 @@ write_manifest() {
   for f in "$site/sgs_cuda_preload.py" "$site/sgs-cuda-preload.pth" /usr/local/bin/sgs-check \
            /usr/local/bin/sgs-venv /usr/local/bin/sgs-jupyter /usr/local/bin/sgs-sbom /etc/systemd/system/sgs-jupyter@.service \
            /etc/profile.d/sgs.sh /etc/modprobe.d/sgs-nvidia.conf /etc/ssh/sshd_config.d/10-sgs.conf \
-           /usr/local/sbin/sgs-gpu-devices /etc/udev/rules.d/72-sgs-nvidia-devices.rules \
+           /usr/local/sbin/sgs-gpu-devices /etc/udev/rules.d/72-sgs-nvidia-devices.rules /etc/udev/rules.d/73-sgs-rdma-devices.rules \
            /etc/systemd/system/nvidia-cdi-refresh.service.d/sgs-gpu-devices.conf \
            /etc/systemd/system/sgs-gpu-devices.service /sbin/ub-device-create \
            /etc/systemd/system/nvidia-persistenced.service.d/sgs-gpu-devices.conf \
+           /etc/systemd/system/nvidia-persistenced.service.d/sgs-persistence.conf \
            /etc/sysctl.d/60-sgs.conf /etc/systemd/system/apport.service.d/sgs-suid-dumpable.conf \
            /etc/audit/rules.d/60-sgs.rules /etc/update-motd.d/60-sgs \
            /etc/systemd/system/sgs-check.service /etc/systemd/system/sgs-check.timer \

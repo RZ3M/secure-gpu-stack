@@ -1,0 +1,25 @@
+== Reaching the machine
+Warning: Permanently added '150.136.35.202' (ED25519) to the list of known hosts.
+  [PASS] SSH with the key works, so the machine is reachable from here
+== Jupyter
+  [PASS] JupyterLab is not reachable directly on 150.136.35.202:8888
+  [PASS] JupyterLab works through an SSH tunnel
+  [PASS] another account on the machine (nobody) can't reach JupyterLab at all
+== SSH
+  [PASS] the server only offers key logins (publickey)
+  [PASS] root can't log in over SSH (PermitRootLogin no)
+== Docker-published ports
+Unable to find image 'busybox:latest' locally
+latest: Pulling from library/busybox
+37bb94b0940b: Pulling fs layer
+37bb94b0940b: Download complete
+46500c34ad0c: Download complete
+37bb94b0940b: Pull complete
+Digest: sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+Status: Downloaded newer image for busybox:latest
+  [SKIP] even 'docker run -p 0.0.0.0:8081:8080' isn't reachable from here (an outer
+         firewall blocks it), so this can't show what the stack's defaults block
+== A compromised service account on the machine
+  [PASS] a service account (nobody) couldn't open any GPU device file while root used the GPU (5 files, 771450 tries)
+
+== Nothing reachable that shouldn't be

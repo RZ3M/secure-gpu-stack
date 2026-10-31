@@ -1,0 +1,17 @@
+# Secure GPU Stack: RDMA device files for the video group only, like the GPU.
+#
+# On InfiniBand and RoCE machines, rdma-core's rules (and Mellanox OFED's)
+# open the verbs and connection-manager devices to every local user, and
+# Lambda Stack's A100 image had /dev/infiniband/uverbs0, rdma_cm and /dev/knem
+# at 0666: any account, service or container could do RDMA, which skips the
+# kernel's network stack, so neither the firewall nor strict outbound mode
+# sees it. The people who run multi-node NCCL jobs are the ones who use the
+# GPU, so they're in video already. ":=" stops later rules (rdma-core's are
+# 90-) from opening them again. The management devices (umad, issm) are left
+# root-only, as the kernel makes them: they send raw fabric management
+# packets. Untested on InfiniBand hardware: no Lambda instance with it yet;
+# single-GPU instances have no RDMA devices at all.
+SUBSYSTEM=="infiniband_verbs", GROUP:="video", MODE:="0660"
+KERNEL=="rdma_cm", GROUP:="video", MODE:="0660"
+KERNEL=="knem", GROUP:="video", MODE:="0660"
+KERNEL=="xpmem", GROUP:="video", MODE:="0660"

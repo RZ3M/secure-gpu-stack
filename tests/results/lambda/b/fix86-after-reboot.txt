@@ -1,0 +1,17 @@
+== at boot
+660 video /dev/nvidia-modeset
+660 video /dev/nvidia-nvswitchctl
+660 video /dev/nvidia-uvm
+660 video /dev/nvidia-uvm-tools
+660 video /dev/nvidia0
+660 video /dev/nvidiactl
+Enabled
+0
+chmod: changing permissions of '/dev/nvidia-nvswitchctl': Read-only file system
+== MIG off and on again as root
+Disabled MIG Mode for GPU 00000000:06:00.0
+Enabled MIG Mode for GPU 00000000:06:00.0
+4
+660 video /dev/nvidia-nvswitchctl
+== sgs-check
+== Result: 54 PASS, 0 WARN, 0 SKIP

@@ -121,6 +121,15 @@ stated.
   **Trade-off:** cuDNN and NCCL keep the same library names across CUDA
   versions, so a single process that imports both PyTorch and TensorFlow gets
   whichever loaded first. Keep GPU work for the two in separate processes.
+  On a Lambda A100 (finding 88) a notebook that mixed them died without a
+  word: `import tensorflow` first, then a PyTorch convolution, is a floating
+  point exception; the other order fails TensorFlow's convolutions with cuDNN
+  status 1008. So whichever of the two loads second now prints a
+  `RuntimeWarning` naming the problem first, also in a notebook cell's output.
+  It fires on a real import only, not a `find_spec` probe. JAX isn't named:
+  `tensorflow.lite` imports it, and JAX and TensorFlow convolutions both
+  worked in one process. On Lambda Stack, where all three share one CUDA,
+  mixing them is expected to work; this is a known difference.
 - **What's on disk is verified, not just what was downloaded:** `sgs-check`
   checks every installed file against the hash its wheel recorded, like
   `debsums` for Python. That's how the overwritten cuDNN and NCCL showed up,
@@ -292,7 +301,17 @@ stated.
   program and image pull would flood the log. So is the rest of `/opt/sgs`:
   its ~60,000 package files would rotate the audit history out of the log on
   every upgrade, and `sgs-check`'s integrity check already covers them. Read
-  the log with `sudo ausearch -k sgs-`.
+  the log with `sudo ausearch -k sgs-` (from a script or a non-interactive
+  `ssh` command, add `--input-logs`: without a terminal, ausearch reads its
+  standard input instead of the log and finds nothing).
+  A path that doesn't exist yet is still watched, as long as its folder
+  exists: the kernel watches the folder, so the path's creation is recorded.
+  The first version watched only paths that existed at install time, so a
+  fresh install never audited the container device specs: `/var/run/cdi`
+  appears only at the first boot, and `/etc/cdi` doesn't exist on Lambda's
+  image at all, though a spec planted there is honored by the container
+  runtime (finding 87, Lambda A100). A missing *folder* still stops auditd
+  loading the rest, so those stay out.
 - **Kernel settings pinned** (`/etc/sysctl.d/60-sgs.conf`): pointer and dmesg
   restrictions, no unprivileged BPF, ptrace scope, and protections for
   `/tmp`. Ubuntu already defaults to these. Pinning them means a tuning guide
@@ -580,11 +599,35 @@ stated.
   user (more people, or Slurm job users) need `sudo usermod -aG video NAME`.
   To change a file's mode by hand, unmount it first (`sudo umount
   /dev/nvidia0`); `sgs-gpu-devices` puts both back.
-- **What it doesn't cover:** other `/dev/nvidia*` files (NVSwitch, NVLink,
-  vGPU) are left as they are, since who needs them is untested here (krabs
-  has none); `sgs-check` warns if any is open to everyone. MIG capability
-  files under `/dev/nvidia-caps` are readable by everyone by NVIDIA's design
-  (MIG monitoring); `sgs-check` warns only if one is writable.
+- **The NVSwitch control file** (`/dev/nvidia-nvswitchctl`, finding 86): the
+  driver registers NVSwitch on every machine, and on a Lambda A100 with no
+  NVSwitch at all, turning MIG on (`sudo nvidia-smi -mig 1`) made root's
+  NVIDIA library create it 0666; `nobody` opened it read-write. Only Fabric
+  Manager and `nvidia-smi`, both root, use it, so `sgs-gpu-devices` now
+  creates it `root:video` 0660 and locks it like the CUDA files, whenever the
+  driver's NVSwitch device number exists. MIG management (creating and
+  destroying slices, turning MIG off and on) still worked with it locked,
+  before and after a reboot.
+- **nvidia-persistenced's socket** (finding 89): `/run/nvidia-persistenced/socket`
+  is 0777, so any account could talk to a daemon that runs with the video
+  group's GPU access (seen on both Lambda images). Only root's `nvidia-smi -pm`
+  and GPU containers use it, so the stack's drop-in closes its folder to
+  accounts outside `video` (0750 `nvidia-persistenced:video`). Containers get
+  the socket mounted in, past the folder, so they're unaffected, but
+  `nvidia-cdi-refresh` (root without `CAP_DAC_OVERRIDE`) then couldn't see it
+  to put it in the spec, so its drop-in adds the video group too.
+- **Persistence mode** (finding 90): Ubuntu's unit starts `nvidia-persistenced`
+  with `--no-persistence-mode`, so the driver tears the GPU down whenever no
+  program has it open. On a Lambda A100 every CUDA program then spent
+  3.4–3.9 s starting up and `nvidia-smi` 2 s; with persistence mode, 0.18 s
+  and 26 ms. GPU memory was still cleared between users (72 GB checked). The
+  installer turns it on, except on machines with a battery, where it would
+  keep the GPU from powering down.
+- **What it doesn't cover:** the per-switch NVSwitch files, NVLink and vGPU
+  files are left as they are, since who needs them is untested here (no
+  multi-GPU machine yet); `sgs-check` warns if any is open to everyone. MIG
+  capability files under `/dev/nvidia-caps` are readable by everyone by
+  NVIDIA's design (MIG monitoring); `sgs-check` warns only if one is writable.
 - **Checked by:** `sgs-check`:
   - no world-open device file
   - the CUDA files exactly `root:video` 0660, and locked
@@ -635,6 +678,33 @@ stated.
   a raw address must be refused, and a missing firewall table or resolver is
   a WARN. With it off, a note says how to turn it on.
 
+## 12. `sgs-check` rates what it finds
+
+- **Why:** on Lambda Stack's A100 it scored 24 PASS / 30 WARN while the
+  machine carried a verified path from the internet to root (a public
+  JupyterLab over plain HTTP whose code could sudo). Every WARN counted the
+  same, the public tunnel was invisible, and a skipped vulnerability audit
+  looked clean (`docs/sgs-check-gaps.md`).
+- **Severity:** each WARN is CRITICAL (from the network, or one ordinary
+  mistake, to root or running code), HIGH (one local or authenticated step
+  from root or sensitive data; a known flaw left unfixed), MEDIUM (defense in
+  depth, the default) or LOW (hygiene). The summary lists CRITICAL and HIGH
+  first, then counts by severity, then coverage.
+- **Chains:** a "Combined risks" section rates combinations as a whole, from
+  flags the individual checks set: a published Jupyter whose code can become
+  root, Jupyter CVEs on top, network-facing fixes pending with automatic
+  updates off, an open GPU with its driver fixes blocked, a tunnel without an
+  audit trail.
+- **Coverage:** "N of M checks ran", naming what didn't. A check that
+  couldn't run is never a pass.
+- **Compatibility:** the `[WARN]` prefix and the final `== Result:` line are
+  unchanged (the login message and the daily service read them), and so is
+  the exit status unless `--fail-on` asks otherwise. `--json FILE` writes
+  every result with its severity.
+- **Proven both ways** on a real Lambda A100: our stack 0 WARN; twelve
+  Lambda-style problems planted on the same machine, 1 CRITICAL and 7 HIGH
+  among them, all caught (`docs/lambda-audit-response.md`).
+
 ## Not done yet (v0.2 candidates)
 
 - **A release key and where it lives** (the signing mechanism is in
@@ -642,12 +712,31 @@ stated.
 - **Our own signed apt repository**, so `apt upgrade` updates the Python stack
   the way it does on Lambda Stack. Today, updating means running a newer
   `install.sh`.
-- **GPU validation on a current GPU.** krabs (GTX 1070, Pascal) proved the
-  driver install path, Secure Boot signing, the container toolkit and
-  TensorFlow on the GPU. PyTorch and JAX need Turing or newer, cuDNN 9.27 has
-  no Pascal kernels, and the cuDNN/NCCL separation matters most for PyTorch
-  on those GPUs. Still to do on a Lambda instance: a PyTorch convolution and
-  NCCL test with the separated libraries, Fabric Manager on NVSwitch systems,
-  and the performance comparison with Lambda Stack.
+- **Multi-GPU Lambda machines.** A single Lambda A100 (2026-10-30,
+  `docs/lambda-test-bench.md`) proved the rest: all three frameworks with
+  convolutions, NCCL with the separated libraries (one GPU), MIG, and speed
+  at least equal to Lambda Stack's PyTorch on the same card. Still to do on
+  an 8-GPU instance: an NCCL all-reduce across GPUs, Fabric Manager with
+  NVSwitch (Lambda's first-boot data disables Fabric Manager on every
+  instance, so check who runs it in their VMs), the per-switch NVSwitch
+  device files, Lambda's `nvidia-persistenced` restart on 8x H100/B200 with
+  the stack's drop-ins, and multi-node NCCL over InfiniBand (Lambda's
+  `/etc/nccl.conf` sets `NCCL_IB_DISABLE=1`).
+- **The cloud-init wrapper on Lambda**, which needs a Lambda API key (Lambda
+  takes user data only through the API).
+- **TensorBoard.** The stack doesn't ship it, so PyTorch's
+  `torch.utils.tensorboard` fails to import (seen on the Lambda A100). If
+  Lambda Stack includes it, it's a compatibility gap to close.
+- **A secret scanner.** `CLAUDE.md`'s design rules say gitleaks is
+  installed; it never was. Ship it (from a verified source) or drop the
+  promise.
 - **uv in the tools environment**, whose default index strategy blocks
   dependency confusion when users add a second index (for example PyTorch's).
+- **From the Lambda Stack audit** (`docs/lambda-audit-response.md`):
+  - the RDMA udev rule (`files/73-sgs-rdma-devices.rules`) on real
+    InfiniBand hardware, with multi-node NCCL
+  - off-host logs and alerting, as a documented opt-in (they need a
+    destination)
+  - `safetensors` in the lock (CLAUDE.md design rule 6 promises it)
+  - CVSS weighting for pending updates (needs an online feed) and
+    repository key expiry in `sgs-check`

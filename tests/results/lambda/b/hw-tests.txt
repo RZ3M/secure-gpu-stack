@@ -1,0 +1,33 @@
+install exit=0
+
+== nvidia-persistenced's socket
+drwxr-x--- nvidia-persistenced video /run/nvidia-persistenced
+srwxrwxrwx nvidia-persistenced nvidia-persistenced /run/nvidia-persistenced/socket
+nobody (not in video): PermissionError: [Errno 13] Permission denied
+ubuntu (in video): connected
+root nvidia-smi -pm 1: Enabled persistence mode via daemon for GPU 00000000:06:00.0.
+root nvidia-smi -pm 0: Disabled persistence mode for GPU 00000000:06:00.0.
+GPU container: GPU 0: NVIDIA A100-SXM4-80GB (UUID: GPU-df0b34fe-31e1-e4e9-f34a-8791d1f12892)
+GPU container, non-root user: GPU 0: NVIDIA A100-SXM4-80GB (UUID: GPU-df0b34fe-31e1-e4e9-f34a-8791d1f12892)
+
+== CUDA start-up time (cuInit + first context), persistence mode off vs on
+persistence 0: 3.38s 3.89s 3.82s | nvidia-smi -L: 1972ms 2012ms 2031ms 
+persistence 1: 2.14s 0.18s 0.18s | nvidia-smi -L: 26ms 27ms 26ms 
+
+== NCCL under Lambda's /etc/nccl.conf (NCCL_IB_DISABLE=1)
+OK, NCCL 2.30.7 sum 1.0
+[0] NCCL INFO NCCL version 2.30.7+cuda13.3
+[0] NCCL INFO NCCL_IB_DISABLE set by environment to 1.
+[0] NCCL INFO NET/Plugin: Could not find: libnccl-net.so
+[0] NCCL INFO NET/Socket : Using [0]eno1:10.19.84.159<0>
+[0] NCCL INFO Using network Socket
+Enabled
+wrote 72448 MB of marker (81151 MB GPU)
+read 72448 MB fresh: marker found 0 times; non-zero bytes 0
+install exit=0
+0
+socket in the CDI spec: 2
+inside a GPU container: srwxrwxrwx 1 109 112 0 Oct 30 21:29 /run/nvidia-persistenced/socket
+inside a non-root GPU container: GPU 0: NVIDIA A100-SXM4-80GB (UUID: GPU-df0b34fe-31e1-e4e9-f34a-8791d1f12892)
+drwxr-x--- 2 nvidia-persistenced video 80 Oct
+== Result: 55 PASS, 0 WARN, 0 SKIP

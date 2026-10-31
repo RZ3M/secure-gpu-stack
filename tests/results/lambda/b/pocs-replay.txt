@@ -1,0 +1,91 @@
+=== POC-1: token -> notebook -> sudo -> root (Lambda: root)
+uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),24(cdrom),27(sudo),30(dip),44(video),105(lxd)
+sudo rc 1 sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+sudo: If sudo i
+['CapEff: 0000000000000000', 'CapBnd: 0000000000000000', 'NoNewPrivs: 1']
+shadow readable: False
+/etc write refused: Read-only file system
+docker.sock refused: Permission denied
+pid 1 visible: False
+  web terminal child python: NoNewPrivs: 1
+  web terminal child bash: NoNewPrivs: 1
+  terminal closed: HTTP 204
+  control, the SSH shell (documented boundary): sudo -n id -u = 0
+=== POC-2: public HTTP Jupyter, token in the URL (Lambda: public 200 over HTTP)
+  000 http://150.136.35.202/
+  000 https://150.136.35.202/
+  000 http://150.136.35.202:8888/api
+  000 http://150.136.35.202:7000/api
+  Host evil.example through the tunnel: 403
+  wrong token: 302 -> http://localhost:18888/login?next=%2Flab%3Ftoken%3DPOC_DUMMY
+152315 bash -c pgrep -a cloudflared; pgrep -af "ngrok|frpc|code tunnel"; echo "  tunnel units: $(systemctl list-unit-files | grep -ciE "cloudflared|ngrok")"
+  tunnel units: 0
+=== POC-3: nobody on the GPU (Lambda: nobody took 8 GB)
+  cuda available: False
+  refused: RuntimeError No CUDA GPUs are available
+  nobody nvidia-smi rc=4
+  device-open scan done
+  control, ubuntu (video): 64 MiB ok
+=== POC-4: AppArmor user-namespace bypass -> CAP_NET_ADMIN (Lambda: uid 0, nft OK)
+  kernel.apparmor_restrict_unprivileged_userns = 1
+  kernel.apparmor_restrict_unprivileged_unconfined = 1
+  plain: unshare: write failed /proc/self/uid_map: Operation not permitted
+  aa-exec docker-default: unshare: write failed /proc/self/uid_map: Operation not permitted
+  aa-exec 1password: unshare: write failed /proc/self/uid_map: Operation not permitted
+  aa-exec Discord: unshare: write failed /proc/self/uid_map: Operation not permitted
+  nft: unshare: write failed /proc/self/uid_map: Operation not permitted
+  nobody: unshare: write failed /proc/self/uid_map: Operation not permitted
+=== POC-5: RDMA/knem, tunnel secret, Jupyter token (Lambda: RDMA/knem 0666, secret readable)
+  ls: cannot access '/dev/infiniband': No such file or directory
+  ls: cannot access '/dev/knem': No such file or directory
+  ls: cannot access '/dev/xpmem': No such file or directory
+  no RDMA modules loaded
+  ls: cannot access '/etc/cloudflared': No such file or directory
+  ls: cannot access '/home/ubuntu/.cloudflared': No such file or directory
+  750 ubuntu:ubuntu /home/ubuntu
+  600 ubuntu:ubuntu /home/ubuntu/.local/share/jupyter/sgs-token
+  700 ubuntu:ubuntu /run/sgs-jupyter/ubuntu
+  600 ubuntu:ubuntu /run/sgs-jupyter/ubuntu/jupyter.sock
+  token not readable by nobody
+  token in the journal: 0
+=== POC-6: root daemons' debug endpoints on loopback (Lambda: cloudflared /config, pprof 200)
+  0.0.0.0:22 users:(("sshd",pid=1588,fd=3),("systemd",pid=1,fd=148))
+  127.0.0.1:42399 users:(("python",pid=151595,fd=30))
+  127.0.0.54:53 users:(("systemd-resolve",pid=12438,fd=17))
+  127.0.0.53%lo:53 users:(("systemd-resolve",pid=12438,fd=15))
+  [::]:22 users:(("sshd",pid=1588,fd=4),("systemd",pid=1,fd=149))
+  20241 000
+  61209 000
+  7000 000
+  8888 000
+  2375 000
+  2376 000
+  25 000
+  111 000
+  ports a notebook reaches: []
+=== POC-7: tunnel around the firewall (Lambda: public Jupyter 200 while 7000 filtered)
+  22 open
+  25 closed/filtered
+  80 closed/filtered
+  111 closed/filtered
+  443 closed/filtered
+  7000 closed/filtered
+  8888 closed/filtered
+  20241 closed/filtered
+  61209 closed/filtered
+  Status: active
+  Logging: on (low)
+  Default: deny (incoming), allow (outgoing), deny (routed)
+ubuntu   bash -c sudo ufw status verbose | head -3 | sed "s/^/  /"; ps -eo user,args | grep -iE "[c]loudflared|[n]grok|[f]rpc|[t]ailscale.*(serve|funnel)|ssh .*-R" || echo "  no outbound tunnel clients"
+ubuntu   grep -iE [c]loudflared|[n]grok|[f]rpc|[t]ailscale.*(serve|funnel)|ssh .*-R
+=== POC-8: the controls that held on Lambda must hold here too
+  root ssh: root@150.136.35.202: Permission denied (publickey).
+  no-token /api/kernels: 403
+  metadata as ubuntu: 000 rc=7
+  as root: 404
+  permission denied while trying to connect to the docker API at unix:///var/run/d
+  docker group: docker:x:988:
+  0 unit files listed.
+  no :25/:111
+=== Extra: SSH forwarding to cloud metadata (ACC-06)
+  via ssh -L: 000

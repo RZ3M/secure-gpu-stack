@@ -1,0 +1,6 @@
+installed in 98s
+2.7.0+cu128 12.8 90701
+0
+{"torch": "2.7.0+cu128", "cuda": "12.8", "cudnn": 90701, "gpu": "NVIDIA A100-SXM4-80GB", "matmul_bf16_tflops": 250.4, "resnet50_img_per_s": 1900, "gpt_tokens_per_s": 177497, "peak_gpu_mem_gib": 6.0}
+{"torch": "2.7.0+cu128", "cuda": "12.8", "cudnn": 90701, "gpu": "NVIDIA A100-SXM4-80GB", "matmul_bf16_tflops": 259.3, "resnet50_img_per_s": 1906, "gpt_tokens_per_s": 177696, "peak_gpu_mem_gib": 6.0}
+{"torch": "2.7.0+cu128", "cuda": "12.8", "cudnn": 90701, "gpu": "NVIDIA A100-SXM4-80GB", "matmul_bf16_tflops": 244.0, "resnet50_img_per_s": 1899, "gpt_tokens_per_s": 177697, "peak_gpu_mem_gib": 6.0}

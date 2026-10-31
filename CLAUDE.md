@@ -110,7 +110,8 @@ TensorFlow and JAX in the system Python. Options:
      and `modelscan` is installed.
 7. **Secrets hygiene:** a secret scanner (gitleaks) is installed, token files
    get restrictive permissions, and the docs cover handling HF, W&B and cloud
-   keys.
+   keys. (Found on Lambda, 2026-10-30: gitleaks was never actually shipped;
+   it's a v0.2 candidate in `docs/design.md`.)
 8. **Visibility:** `auditd` logging, plus a check command that shows the
    machine's security posture. An optional strict mode restricts outbound
    traffic for sensitive work.
@@ -131,11 +132,15 @@ TensorFlow and JAX in the system Python. Options:
 - **On GitHub:** `RZ3M/secure-gpu-stack` (public since 2026-10-29). The v0.1.0 release holds
   the walkthrough videos and the first install tarball. v0.1.1 (2026-10-29,
   with the M2 fixes) is the current tarball, and holds the M2 update video;
-  the tarball's SHA-256 is in the annotated `v0.1.1` tag.
+  the tarball's SHA-256 is in the annotated `v0.1.1` tag. The branch is at
+  0.1.2 (the Lambda round, 2026-10-30), not yet released.
 - **Walkthrough videos:** `video/` (8:50) and `video/m2/` (the M2 update,
   3:38); see `video/README.md`.
 - **Goal and success criteria:** `README.md`.
-- **Findings about Lambda Stack, with evidence:** `docs/lambda-stack-findings.md`.
+- **Findings about Lambda Stack, with evidence:** `docs/lambda-stack-findings.md`;
+  real-instance audit: `docs/lambda-instance-audit.md`; verified attack
+  chain/PoCs: `docs/lambda-instance-pocs.md`; `sgs-check` gaps and scoring:
+  `docs/sgs-check-gaps.md`; raw domain reports: `docs/audit/`.
 - **Design decisions and trade-offs:** `docs/design.md`.
 - **Threat model** (who the stack protects against, and what it doesn't): `docs/threat-model.md`.
 - **The installer and its config:** `install.sh`, `files/`.
@@ -167,6 +172,12 @@ TensorFlow and JAX in the system Python. Options:
   deleted afterwards. Prove the sandbox first (try sudo, writing `/etc`,
   reading home), then run the review.
 - **Lambda first-boot wrapper:** `cloud-init/lambda-user-data.yaml`.
+- **The stack on real Lambda hardware:** `docs/lambda-test-bench.md` (findings
+  86–90, re-proved earlier findings, speed, Lambda's first-boot vendor data,
+  testing gotchas such as `ausearch --input-logs` over `ssh`).
+- **What we did with the Lambda Stack audit:** `docs/lambda-audit-response.md`
+  (every audit finding and G-gap with its status, the `sgs-check` severity
+  model, the PoC replays on B, findings 91–92, what was declined and why).
 - **Lambda baseline VM** (`lambda-probe`): Lambda's repository plus its CPU
   Python packages. Not the full CUDA stack, since that needs accepting the cuDNN
   license. `sgs-check` runs there with `SGS_PIP_AUDIT=/tmp/audit/bin/pip-audit`,
@@ -363,8 +374,47 @@ TensorFlow and JAX in the system Python. Options:
   3080, also with `--no-cuda-toolkit`; GPU containers work. M2's VMs
   `a`–`e` are stopped, disks kept (122 GB in `~/sgs-vm`).
 - [ ] Run `docs/lambda-test-plan.md` on real Lambda instances: Lambda's cloud
-  image, data-center GPUs, multi-GPU NCCL. This is waiting for the user to
-  provide a Lambda environment.
+  image, data-center GPUs, multi-GPU NCCL. **Instance A audited 2026-10-30**
+  (Lambda's default image, `gpu_1x_a100_sxm4`): `docs/lambda-instance-audit.md`,
+  2 Critical / 9 High / 7 Medium / 4 Low; `sgs-check` 24 PASS / 30 WARN / 1 SKIP;
+  all three frameworks on the A100. The token → root chain was verified
+  end-to-end (POC-1) and the `sgs-check` blind spots/scoring changes are
+  documented in `docs/lambda-instance-pocs.md` and `docs/sgs-check-gaps.md`.
+  **Instance B done 2026-10-30** (Lambda's Ubuntu 24.04.2, `gpu_1x_a100_sxm4`,
+  got an A100-SXM4-**80GB**): `docs/lambda-test-bench.md`, raw output in
+  `tests/results/lambda/b/`. Install 18m42s; `sgs-check --gpu-test` 58 PASS /
+  0 WARN; user checks 13/13; attack demo 7 PASS + 1 SKIP (Lambda's firewall);
+  every earlier finding re-proved by direct attack; strict egress survived a
+  reboot on Lambda. Same-GPU speed vs Lambda Stack's PyTorch 2.7.0: ResNet-50
+  1,943 vs 1,900 img/s, GPT 187,640 vs 177,696 tok/s. Findings 86–90 fixed
+  and re-verified there (MIG opens `/dev/nvidia-nvswitchctl`; CDI specs
+  unaudited on fresh installs; PyTorch+TensorFlow in one process crash, now a
+  warning; persistenced socket 0777; persistence mode off cost 3.5 s per CUDA
+  start). `install.sh` says 0.1.2: committed and pushed to `stack/v0.1`
+  on 2026-10-30, not yet a release. Still pending: multi-GPU NCCL/NVSwitch/InfiniBand, cloud-init via the
+  Lambda API.
+- [x] Lambda Stack audit applied (2026-10-30): `docs/lambda-audit-response.md`.
+  `sgs-check` rates every WARN (CRITICAL/HIGH/MEDIUM/LOW), rates chains
+  ("Combined risks"), reports coverage, writes `--json`, has `--fail-on`, and
+  closes G-01..G-20 (tunnels and their public edge, any Jupyter's sudo/token/
+  Host header, pipx and per-environment pip-audit, network-facing update
+  severity, repo staleness, RDMA, CPU, capabilities, disk group, SSH
+  algorithms, metadata precision). Stack: SSH algorithms and key files
+  (behind a lockout check), kexec/userfaultfd pinned, 35 audit rules, RDMA
+  udev rule (untested on InfiniBand), `sgs-jupyter` token outside the URL +
+  `--rotate` + public address (finding 91), per-environment pip-audit
+  (finding 92), `dpkg --verify` of sshd/sudo/PAM/systemd/libc. On B: every
+  audit PoC fails, 12 planted Lambda-style problems all caught (1 CRITICAL,
+  7 HIGH), our stack 0 WARN. An independent review then found 6 real bugs
+  (root parsing users' tunnel configs and fetching their hostnames; a token
+  echoed by `dirname`; the RDMA rule opening umad; forced root keys rated LOW
+  without `no-port-forwarding`; `sudo` wrappers counted as Jupyter; 4xx/5xx
+  plain HTTP missed) plus minor ones, all fixed and re-verified on B; also
+  `tests/jupyter-cell.py`'s reply/idle race. Final on B: `sgs-check
+  --gpu-test` 69 PASS / 0 WARN, coverage 69/69. Committed and pushed
+  2026-10-30 in two commits: the user's audit (their DeepSeek agents, not
+  Claude; Lambda Stack findings 16–33 now in the findings summary), then
+  this work. Instance B was still running at ~$1.99/hr at that point.
 - [ ] v0.2 candidates are listed at the end of `docs/design.md`.
 
 ## Environment notes

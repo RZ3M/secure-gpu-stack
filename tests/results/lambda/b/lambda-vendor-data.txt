@@ -1,0 +1,583 @@
+Content-Type: multipart/mixed; boundary="===============6721168945241643320=="
+MIME-Version: 1.0
+
+--===============6721168945241643320==
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename=vendor-data.txt
+Merge-Type: list(append)+dict(recurse_array)+str()
+
+#cloud-config
+
+updates:
+  network:
+    when: ['boot']
+
+# Let other cloud-init operations continue during root fs resize.
+# This provides a significant first-boot time improvement.
+resize_rootfs: noblock
+
+--===============6721168945241643320==
+Content-Type: text/cloud-boothook; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename=20-fabricmanager-disable
+
+#cloud-boothook
+#!/bin/sh
+
+cloud-init-per instance fabricmanager-disable systemctl disable --now nvidia-fabricmanager.service || true
+
+--===============6721168945241643320==
+Content-Type: text/x-shellscript; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename=20-nccl-conf
+
+#!/bin/sh
+
+cat > /etc/nccl.conf << EOF
+NCCL_IB_DISABLE=1
+EOF
+
+--===============6721168945241643320==
+Content-Type: text/x-shellscript; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename=90-first-boot
+
+#!/usr/bin/env python3
+
+# This script runs in the guest at the first boot from the guestfs-firstboot service.
+# It checks the network configuration is as expected, reports the number of GPUs
+# visible to pytorch and waits for a ping to a public target to succeed.
+# On hosts with 8x H100 GPUs, it also performs a check of the NVlink topology
+# and restart nvidia-persistenced to workaround a bug in the driver.
+# At the end of the checks, it returns the output of the test as json over a serial
+# port. After that initial check, the serial port is unused for the rest of the
+# lifetime of this guest.
+# This script can be re-run at any time.
+
+import argparse
+import contextlib
+import importlib
+import json
+import re
+import shutil
+import subprocess
+import warnings
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from time import sleep
+from typing import Any
+
+VERSION = 6
+DEVICES_PATH = Path("/sys/bus/pci/devices")
+NVIDIA_VENDOR_ID = 0x10DE
+GPU_CLASSES = {0x030000, 0x030200}
+PING_TIMEOUT_SEC = 600
+NETWORK_ONLINE_TIMEOUT_SEC = 300
+PING_PUBLIC_ENABLED = True
+PING_PUBLIC_TARGETS = ["1.1.1.1", "8.8.8.8"]
+PING_GATEWAY = "10.19.80.1"
+SERIAL_PORT_GLOB = "vport*p30"
+IP_MASK = "10.19.84.159/20"
+EXPECTED_GPU_COUNT = 1
+USER_DATA_PRESENT = False
+
+
+@dataclass(frozen=True, eq=True)
+class SystemDeviceType(str, Enum):
+    GPU = "GPU"
+    NIC = "NIC"
+
+
+@dataclass(frozen=True, eq=True)
+class SystemDeviceRef:
+    device_idx: int
+    device_type: SystemDeviceType
+
+
+@dataclass(frozen=True, eq=True)
+class SystemBusType(str, Enum):
+    # These are taken from "nvidia-smi topo -m"
+    SYS = "SYS"  # Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+    NODE = "NODE"  # Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+    PHB = "PHB"  # Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+    PXB = "PXB"  # Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+    PIX = "PIX"  # Connection traversing at most a single PCIe bridge
+    NV6 = "NV6"  # Connection traversing a bonded set of 6 NVLinks
+    NV12 = "NV12"  # Connection traversing a bonded set of 12 NVLinks
+    NV18 = "NV18"  # Connection traversing a bonded set of 18 NVLinks
+
+
+@dataclass(frozen=True, eq=True)
+class SystemGPUDevice:
+    idx: int
+    numa_affinity: int | None = None
+
+
+@dataclass(frozen=True, eq=True)
+class SystemNetworkDevice:
+    idx: int
+    name: str
+    numa_affinity: int | None = None
+
+
+@dataclass(frozen=True, eq=True)
+class SystemDeviceAdjacency:
+    neighbors: frozenset[SystemDeviceRef]
+    bus: SystemBusType
+
+
+@dataclass(frozen=True, eq=True)
+class SystemDeviceMap:
+    gpus: frozenset[SystemGPUDevice]
+    nics: frozenset[SystemNetworkDevice]
+    adjacencies: frozenset[SystemDeviceAdjacency]
+
+    def __contains__(self, other: Any) -> bool:
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+
+        return (
+            self.gpus.issuperset(other.gpus)
+            and self.nics.issuperset(other.nics)
+            and self.adjacencies.issuperset(other.adjacencies)
+        )
+
+
+def parse_nvidia_topo(stdout: str) -> SystemDeviceMap | None:
+    class _ResultStages(Enum):
+        HEADER = 0
+        DEVICE_LINES = 1
+        NIC_LEGEND = 2
+
+    stdout_lines = stdout.splitlines()
+    if len(stdout_lines) == 0:
+        return None
+
+    header_fields = list[str]()
+    assoc_table = list[dict[str, str]]()
+    nic_legend = dict[str, str]()
+
+    header_matcher = re.compile(r"GPU[0-9]+|NIC[0-9]+|CPU Affinity|NUMA Affinity|GPU Numa ID")
+    nic_legend_matcher = re.compile(r"\s*(NIC[0-9]+):\s+(\w+)")
+
+    stage = _ResultStages.HEADER
+
+    for line in stdout_lines:
+        if stage == _ResultStages.HEADER:
+            header_fields.extend(
+                [match.group(0) for match in header_matcher.finditer(stdout_lines[0])],
+            )
+            if len(header_fields) > 0:
+                header_fields.insert(0, "DEVICE")
+                stage = _ResultStages.DEVICE_LINES
+
+        elif stage == _ResultStages.DEVICE_LINES:
+            if re.match(r"(GPU|NIC)[0-9]+\s+", line):
+                fields = re.split(r"\s+", line)
+                if len(fields) != 0:
+                    dev_entry = dict(zip(header_fields, fields, strict=False))
+                    assoc_table.append(dev_entry)
+            else:
+                stage = _ResultStages.NIC_LEGEND
+
+        elif stage == _ResultStages.NIC_LEGEND:
+            match = nic_legend_matcher.match(line)
+            if match:
+                nic_legend[match.group(1)] = match.group(2)
+
+    gpu_idxs = dict[str, int]()
+    nic_idxs = dict[str, int]()
+    for field in header_fields:
+        if field.startswith("GPU"):
+            gpu_idxs[field] = int(field[3:])
+        elif field.startswith("NIC"):
+            nic_idxs[field] = int(field[3:])
+
+    nic_devices = set[SystemNetworkDevice]()
+    gpu_devices = set[SystemGPUDevice]()
+    adjacencies = set[SystemDeviceAdjacency]()
+
+    for name, idx in nic_idxs.items():
+        nic_devices.add(SystemNetworkDevice(name=nic_legend[name], idx=idx))
+
+    for assoc in assoc_table:
+        if assoc["DEVICE"].startswith("GPU"):
+            gpu_idx = gpu_idxs[assoc["DEVICE"]]
+            gpu_device = SystemGPUDevice(idx=gpu_idx, numa_affinity=int(assoc["NUMA Affinity"]))
+            gpu_devices.add(gpu_device)
+            dev_ref = SystemDeviceRef(device_idx=gpu_idx, device_type=SystemDeviceType.GPU)
+
+        elif assoc["DEVICE"].startswith("NIC"):
+            nic_idx = nic_idxs[assoc["DEVICE"]]
+            dev_ref = SystemDeviceRef(device_idx=nic_idx, device_type=SystemDeviceType.NIC)
+
+        else:
+            continue
+
+        for header, linkage in assoc.items():
+            for bus_type in SystemBusType:
+                if bus_type.value == linkage:
+                    break
+            else:  # for bus_type
+                # Invalid linkage (ex: because it's the same device)
+                continue
+
+            if header.startswith("GPU"):
+                neighbor_ref = SystemDeviceRef(
+                    device_idx=gpu_idxs[header],
+                    device_type=SystemDeviceType.GPU,
+                )
+
+            elif header.startswith("NIC"):
+                neighbor_ref = SystemDeviceRef(
+                    device_idx=nic_idxs[header],
+                    device_type=SystemDeviceType.NIC,
+                )
+
+            else:
+                continue
+
+            adjacency = SystemDeviceAdjacency(
+                neighbors=frozenset((dev_ref, neighbor_ref)),
+                bus=bus_type,
+            )
+            adjacencies.add(adjacency)
+
+    return SystemDeviceMap(
+        gpus=frozenset(gpu_devices),
+        nics=frozenset(nic_devices),
+        adjacencies=frozenset(adjacencies),
+    )
+
+
+def parse_system_map(systemmap: SystemDeviceMap, topo: str) -> dict[str, bool | str]:
+    success = True
+    log = []
+    total_gpu_pairs = 0
+    for device_adjacency in systemmap.adjacencies:
+        # Find pairs of GPUs
+        gpu_count = 0
+        gpus = []
+        for neighbor in device_adjacency.neighbors:
+            if neighbor.device_type != SystemDeviceType.GPU:
+                break
+            gpu_count += 1
+            gpus.append(neighbor.device_idx)
+        if gpu_count != 2:
+            continue
+        # On a pair of GPUs, ensure we communicate through the NVLINK
+        if device_adjacency.bus != SystemBusType.NV18:
+            log.append(f"broken link between GPU {gpus[0]} and GPU {gpus[1]}")
+            success = False
+        else:
+            total_gpu_pairs += 1
+    expected_pairs = int(EXPECTED_GPU_COUNT * (EXPECTED_GPU_COUNT - 1) / 2)
+    if total_gpu_pairs != expected_pairs:
+        log.append(
+            f"Unexpected number of valid GPU pairs: {total_gpu_pairs}, expected {expected_pairs}"
+        )
+        success = False
+    if success:
+        log.append(f"Nvidia topology is as expected, {total_gpu_pairs} GPU pairs")
+    else:
+        # If something failed, dump the whole topology as text for debugging
+        log.append(topo)
+
+    return {"success": success, "output": ", ".join(log)}
+
+
+def restart_persistenced() -> None:
+    """Restart persistenced to workaround a bug in the nvidia driver (PRIM-349)"""
+    subprocess.run(["systemctl", "restart", "nvidia-persistenced.service"], check=False)
+
+
+def run_shell_command(command):
+    try:
+        output = subprocess.check_output(command, shell=False, stderr=subprocess.STDOUT, text=True)
+        return {"success": True, "output": output}
+    except subprocess.CalledProcessError as e:
+        return {"success": False, "output": e.output}
+
+
+def get_nvidia_model() -> str | None:
+    command = ["nvidia-smi", "-L"]
+    ret = run_shell_command(command)
+    if not ret.get("success"):
+        return None
+    return ret.get("output").split(" ")[3]
+
+
+def check_nvlink_topo() -> dict[str, bool | str]:
+    command = ["nvidia-smi", "topo", "-m"]
+    ret = run_shell_command(command)
+    topo = ret.get("output")
+    systemmap = parse_nvidia_topo(topo)
+    if systemmap is None:
+        return {"success": False, "output": "Empty output"}
+    return parse_system_map(systemmap, topo)
+
+
+def test_nvidia_topology() -> dict[str, bool | str]:
+    # Only check if we have the 8 GPUs
+    if EXPECTED_GPU_COUNT != 8:
+        return {"success": True, "output": "Expected GPU count is not 8, skipped"}
+
+    model = get_nvidia_model()
+    if model is None:
+        return {"success": False, "output": "Failed to get Nvidia model"}
+    if model in {"H100", "B200"}:
+        valid_topo = check_nvlink_topo()
+        if not valid_topo.get("success", False):
+            # PRIM-349
+            restart_persistenced()
+            valid_topo = check_nvlink_topo()
+        return valid_topo
+    return {"success": True, "output": f"Skipped on {model}"}
+
+
+def test_correct_network() -> dict[str, bool | str]:
+    """Ensure the expected IP address is configured on one interace."""
+
+    command = ["ip", "addr", "list"]
+    ret = run_shell_command(command)
+    if IP_MASK not in ret["output"]:
+        ret["success"] = False
+    return ret
+
+
+def test_ping_gateway() -> dict[str, bool | str]:
+    """Wait up to PING_TIMEOUT_SEC seconds for an ICMP reply from the network gateway."""
+
+    ping_request_timeout_sec = 3
+    nr_attempts = int(PING_TIMEOUT_SEC / ping_request_timeout_sec)
+    for _ in range(nr_attempts):
+        command = ["ping", PING_GATEWAY, "-c", "1", "-W", str(ping_request_timeout_sec)]
+        ret = run_shell_command(command)
+        if ret["success"]:
+            return ret
+    # Sometimes a gateway may not reply to ICMP packets, however, it's reachable and
+    # will forward traffic. But the result equivalent to what "arping" does is enough
+    # for this check to succeed.
+    command = ["ip", "neighbor", "show", "to", PING_GATEWAY, "nud", "reachable"]
+    ret = run_shell_command(command)
+    # An entry is returned if present, otherwise the output is just empty.
+    if PING_GATEWAY not in ret["output"]:
+        ret["output"] = "Unable to resolve gateway MAC via ARP"
+        # The above command exits with 0 even if the entry isn't present. Using "get" instead
+        # of show is a possibility but it needs a netdev to be specified.
+        ret["success"] = False
+    return ret
+
+
+def test_ping_public() -> dict[str, bool | str]:
+    """Wait up to PING_TIMEOUT_SEC seconds from an ICMP reply to a public target."""
+
+    if not PING_PUBLIC_ENABLED:
+        return {"success": True, "output": "skipped"}
+
+    ping_request_timeout_sec = 3
+    nr_attempts = int(PING_TIMEOUT_SEC / len(PING_PUBLIC_TARGETS) / ping_request_timeout_sec)
+    for _ in range(nr_attempts):
+        for t in PING_PUBLIC_TARGETS:
+            command = ["ping", t, "-c", "1", "-W", str(ping_request_timeout_sec)]
+            ret = run_shell_command(command)
+            if ret["success"]:
+                return ret
+
+    # If we reach this point, we failed to ping any of the targets.
+    def _run_diag(command) -> str:
+        diag_ret = run_shell_command(command)
+
+        return "\n".join(
+            (
+                ret.get("output", ""),
+                f"# {' '.join(command)}",
+                diag_ret.get("output", "No output"),
+            )
+        )
+
+    # Gather tracepath output for each target.
+    for t in PING_PUBLIC_TARGETS:
+        ret["output"] = _run_diag(["tracepath", "-n", "-p", "33434", t])
+
+    # Gather the routing table.
+    ret["output"] = _run_diag(["ip", "-d", "route", "show", "table", "all"])
+
+    return ret
+
+
+def test_num_gpus() -> dict[str, bool | str]:
+    """Report the number of GPUs visible to pytorch."""
+
+    # On CPU-only instances, pytorch doesn't need to be installed
+    if EXPECTED_GPU_COUNT == 0:
+        return {"success": True, "output": "Expected GPU count is 0, skipped"}
+
+    # Pytorch doesn't throw an exception, it just reports a warning if it fails:
+    # UserWarning: Can't initialize NVML
+    # This makes it throw the exception so we can catch it.
+    warnings.filterwarnings("error")
+
+    with contextlib.suppress(ModuleNotFoundError):
+        import torch  # type: ignore
+
+        ret: dict[str, bool | str] = {}
+
+        try:
+            count = torch.cuda.device_count()
+            ret["output"] = str(count)
+            if count == EXPECTED_GPU_COUNT:
+                ret["success"] = True
+            else:
+                ret["success"] = False
+        except Exception:
+            ret["success"] = False
+            ret["output"] = "Pytorch/CUDA failure"
+        return ret
+
+    return {"success": False, "output": "Missing pytorch"}
+
+
+def test_systemd() -> dict[str, bool | str]:
+    """Report the list of failed systemd unit."""
+
+    command = ["systemctl", "--failed", "--no-legend", "--plain"]
+    ret = run_shell_command(command)
+    if len(ret["output"]) == 0:
+        ret["success"] = True
+    else:
+        ret["success"] = False
+    return ret
+
+
+def test_network_online() -> dict[str, bool | str]:
+    """Wait until the network is fully configured before continuing.
+    This must run before the other network-dependent checks."""
+
+    command = ["systemctl", "is-active", "network-online.target"]
+    for _ in range(NETWORK_ONLINE_TIMEOUT_SEC):
+        ret = run_shell_command(command)
+        if not ret["success"]:
+            sleep(1)
+            continue
+        return ret
+    return {
+        "success": False,
+        "output": f"network-online.target not reached before {NETWORK_ONLINE_TIMEOUT_SEC} seconds",
+    }
+
+
+def nvidia_smi_present() -> bool:
+    return shutil.which("nvidia-smi") is not None
+
+
+def pytorch_present() -> bool:
+    with contextlib.suppress(ModuleNotFoundError):
+        importlib.import_module("torch")
+        return True
+    return False
+
+
+def check_if_lambda_image():
+    with contextlib.suppress(ModuleNotFoundError):
+        import apt  # type: ignore
+
+        cache = apt.Cache()
+        if "lambda-stack-cuda" in cache or "lambda-repository" in cache:
+            return nvidia_smi_present() and pytorch_present()
+
+    return False
+
+
+def generate_tests(
+    is_nvidia_smi_present: bool, is_pytorch_present: bool, is_user_data_present: bool
+) -> dict[str, Callable]:
+    tests = {
+        "network_online": test_network_online,
+        "correct_network": test_correct_network,
+        # "systemd": test_systemd,
+    }
+
+    if is_nvidia_smi_present:
+        tests["nvidia_topology"] = test_nvidia_topology
+
+    if is_pytorch_present:
+        # gpus_count must be after the topology check otherwise pytorch
+        # already holds a reference to the device and restarting
+        # nvidia-persistenced does nothing.
+        tests["gpus_count"] = test_num_gpus
+
+    if not is_user_data_present:
+        tests["ping_public"] = test_ping_public
+        tests["ping_gateway"] = test_ping_gateway
+
+    return tests
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run tests on the first boot of a guest")
+    parser.add_argument(
+        "--test",
+        type=str,
+        help="Specify which test to run.",
+        default="all",
+    )
+    args = parser.parse_args()
+
+    is_nvidia_smi_present = nvidia_smi_present()
+    is_pytorch_present = pytorch_present()
+    is_lambda_image = check_if_lambda_image()
+    is_user_data_present = USER_DATA_PRESENT
+
+    results = {
+        "version": VERSION,
+        "health_checks": {},
+        "is_nvidia_smi_present": str(is_nvidia_smi_present),
+        "is_pytorch_present": str(is_pytorch_present),
+        "is_lambda_image": str(is_lambda_image),
+        "is_user_data_present": str(is_user_data_present),
+    }
+
+    tests = generate_tests(
+        is_nvidia_smi_present=is_nvidia_smi_present,
+        is_pytorch_present=is_pytorch_present,
+        is_user_data_present=is_user_data_present,
+    )
+
+    for test_name, test_func in tests.items():
+        # print statements end up in /root/virt-sysprep-firstboot.log
+        print(f"first-boot running {test_name}")
+        results["health_checks"][test_name] = test_func()
+
+    pub_check = results["health_checks"].get("ping_public", None)
+    if (
+        pub_check is not None
+        and (gw_check := results["health_checks"].get("ping_gateway")) is not None
+        and not gw_check["success"]
+        and pub_check["success"]
+    ):
+        gw_check["success"] = pub_check["success"]
+        gw_check["output"] += "\n# Overridden by ping_public success"
+
+    port = list(Path("/dev").glob(SERIAL_PORT_GLOB))
+    if len(port) != 1:
+        print(f"Failed to find a port matching {SERIAL_PORT_GLOB}")
+        return
+
+    with port[0].open("a") as f:
+        # We must only output as a single line.
+        f.write(json.dumps(results, indent=2).replace("\n", ""))
+        f.write("\nBREAK_JSON_PARSER__USER_PRIVATE_DATA_BELOW\n")
+
+
+if __name__ == "__main__":
+    main()
+
+--===============6721168945241643320==--

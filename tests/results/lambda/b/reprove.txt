@@ -1,0 +1,81 @@
+secure-gpu-stack-0.1.2.tar.gz: OK
+install exit=0
+    24 rules in /etc/audit/rules.d/60-sgs.rules (read with: sudo ausearch -k sgs-)
+
+== Audit: creating /etc/cdi (absent on Lambda's image) is recorded (finding 87)
+ls: cannot access '/etc/cdi': No such file or directory
+-w /etc/cdi -p wa -k sgs-gpu
+-w /var/run/cdi -p wa -k sgs-gpu
+-w /etc/systemd/system/nvidia-cdi-refresh.service.d -p wa -k sgs-gpu
+events naming /etc/cdi/sgs-probe.yaml: 1
+
+== Kernel lockdown: root reading kernel memory (Round Y)
+dd: failed to open '/dev/mem': Operation not permitted
+/proc/kcore: readable
+[   13.501995] Lockdown: swapper/0: hibernation is restricted; see man kernel_lockdown.7
+[  437.996992] Lockdown: dd: /dev/mem,kmem,port is restricted; see man kernel_lockdown.7
+
+== io_uring for ordinary users (Round H)
+io_uring_setup as uid 1000: Operation not permitted
+
+== User namespaces, and the aa-exec way around Ubuntu's limit (Round J)
+unshare -Ur: unshare: write failed /proc/self/uid_map: Operation not permitted
+aa-exec -p 1password -- unshare -Ur: unshare: write failed /proc/self/uid_map: Operation not permitted
+aa-exec -p Discord -- unshare -Ur: unshare: write failed /proc/self/uid_map: Operation not permitted
+aa-exec -p "MongoDB -- unshare -Ur: [16583] aa-exec: ERROR: profile '"MongoDB' does not exist
+
+== Line disciplines: an ordinary user loading kernel modules through a tty (Round L)
+N_PPP refused: Operation not permitted
+N_HDLC refused: Operation not permitted
+N_GSM refused: Operation not permitted
+no line-discipline modules loaded
+
+== Core dumps (Round AA)
+fs.suid_dumpable=0 core_pattern=|/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -F%F -- %E
+
+== Daily check and login message (Round N)
+enabled
+Sat 2026-10-31 00:42:42 UTC 3h 48min Fri 2026-10-30 20:25:56 UTC      - sgs-check.timer sgs-check.service
+Result=success
+ Secure GPU Stack 0.1.2
+   sgs-check          see this machine's security status
+   sgs-jupyter        JupyterLab URL and the SSH tunnel to reach it
+   sgs-venv ~/env     your own Python environment on top of the stack
+
+== Docker: no docker group, ports on localhost, metadata blocked in containers (rule 5, Rounds V and X)
+ubuntu is not in the docker group
+docker ps without sudo: permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+docker run -p 8080:8080 listens on: 127.0.0.1:8080 
+metadata from a bridge container: wget: can't connect to remote host (169.254.169.254): No route to host
+metadata from a host-network container: wget: can't connect to remote host (169.254.169.254): No route to host
+metadata as root on the host: HTTP 404
+NVIDIA Container Toolkit: NVIDIA Container Toolkit CLI version 1.20.1
+
+== sgs-check names a root-equivalent container (Round P)
+  [WARN] Running containers with root over this machine: sgs-priv-probe (privileged) 
+
+== sgs-check notices new persistence (Rounds W and Z)
+  [WARN] Startup files changed since last accepted: new or changed: /home/ubuntu/.bashrc /var/spool/cron/crontabs/ubuntu (check them, then: sudo sgs-check --accept-changes)
+== Result: 54 PASS, 1 WARN, 0 SKIP
+after undoing: == Result: 55 PASS, 0 WARN, 0 SKIP
+
+== SSH, firewall, updates (rules 3 and 4)
+permitrootlogin no
+passwordauthentication no
+kbdinteractiveauthentication no
+x11forwarding no
+Status: active
+
+To                         Action      From
+--                         ------      ----
+OpenSSH                    ALLOW       Anywhere                  
+OpenSSH (v6)               ALLOW       Anywhere (v6)             
+unattended-upgrades: enabled
+held/pinned GPU packages: 0
+
+== Secrets and Python tools (rules 6 and 7)
+gitleaks: missing
+pip-audit: missing
+modelscan: /usr/local/bin/modelscan
+sgs-venv: /usr/local/bin/sgs-venv
+sgs-sbom: /usr/local/bin/sgs-sbom

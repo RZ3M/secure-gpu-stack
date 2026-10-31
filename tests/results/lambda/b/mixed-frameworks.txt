@@ -1,0 +1,28 @@
+install exit=0
+== TensorFlow only
+tf conv OK
+   exit=0
+== PyTorch only
+torch conv OK
+   exit=0
+== TensorFlow, then only asking whether torch and jax are installed
+probe OK True True
+   exit=0
+== PyTorch, then only asking whether tensorflow is installed
+probe OK True
+   exit=0
+== TensorFlow, then PyTorch on the GPU (crashed before)
+/opt/sgs/venv/lib/python3.12/site-packages/sgs_cuda_preload.py:138: RuntimeWarning: TensorFlow is already loaded in this process. PyTorch (CUDA 13) and TensorFl
+   exit=136
+== PyTorch on the GPU, then TensorFlow
+/opt/sgs/venv/lib/python3.12/site-packages/sgs_cuda_preload.py:101: RuntimeWarning: PyTorch is already loaded in this process. PyTorch (CUDA 13) and TensorFlow 
+   exit=0
+== TensorFlow, then JAX
+imported OK
+   exit=0
+== TensorFlow, then JAX on the GPU (works)
+jax conv OK
+   exit=0
+== Keras (TensorFlow backend) model.fit
+keras fit OK
+   exit=0

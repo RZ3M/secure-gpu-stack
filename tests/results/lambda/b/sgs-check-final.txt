@@ -1,0 +1,108 @@
+Waiting for another sgs-check run to finish...
+
+== Machine
+  Ubuntu 24.04.2 LTS, kernel 6.8.0-147-generic, amd64
+  NVIDIA GPUs: 1
+  Stack: Secure GPU Stack 0.1.2
+
+== Package sources
+  [PASS] developer.download.nvidia.com: HTTPS, key limited to this source
+  [PASS] download.docker.com: HTTPS, key limited to this source
+  [PASS] sgs-nvidia-cuda.gpg is still the key pinned at install (EB693B3035CD5710E231E123A4B469963BF863CC)
+  [PASS] sgs-docker.gpg is still the key pinned at install (9DC858229FC7DD38854AE2D88D81803C0EBFCD88)
+  [PASS] No third-party key is trusted for every repository
+  [PASS] No apt pin can override Ubuntu's updates or force downgrades
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [PASS] Driver branch R580 is supported by NVIDIA until 2028-06
+  [PASS] Driver is the newest build Ubuntu offers
+  [PASS] GPU performance counters are admin-only
+  [PASS] NVIDIA kernel module is signed (Canonical Ltd. Kernel Module Signing)
+         
+  [PASS] GPU device files are for the video group only, and locked (ubuntu)
+  [PASS] A service account (nobody) can't open the GPU
+
+== Containers
+  [PASS] NVIDIA Container Toolkit 1.20.1
+  [PASS] Nobody is in the root-equivalent docker group
+  [PASS] Published container ports stay on localhost unless asked otherwise, on every Docker network
+  [PASS] Containers can't gain privileges through setuid programs
+  [PASS] Containers get the GPU only when asked (--gpus or --device)
+  [PASS] GPU device spec matches the installed driver (/var/run/cdi/nvidia.yaml)
+
+== Python ML stack
+  [PASS] Stack lives in its own environment, separate from the OS's Python
+         torch 2.15.0   tensorflow 2.21.0   keras 3.15.1   jax 0.12.0.1   jupyterlab 4.6.4
+  [PASS] The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)
+  [PASS] Stack packages are read-only for users
+  [PASS] Any account can use the stack (nobody found torch tensorflow jax)
+  [PASS] torch.compile keeps its generated code, and Python its temp files, in each user's own ~/.cache, not in /tmp
+  [PASS] Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root
+  [PASS] No system CUDA libraries override the stack's
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] pip can't overwrite the OS's own Python packages (no break-system-packages)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [PASS] No known vulnerabilities in 149 Python packages
+  [PASS] No known vulnerabilities in 12 Python packages (/opt/sgs/tf-cuda12)
+  [PASS] No known vulnerabilities in 33 Python packages (/opt/sgs/tools)
+  [PASS] All 59497 installed files match what their packages recorded
+  [PASS] The stack's own files (startup hook, commands, Jupyter unit) are as installed
+  [PASS] The driver, CUDA, cuDNN, NCCL, container and login (sshd, sudo, PAM, systemd, libc) files match their packages (87 packages)
+
+== Network exposure
+  [PASS] Only SSH listens on the network
+  [PASS] JupyterLab listens only on a socket its user alone can open (reach it with an SSH tunnel: sgs-jupyter)
+  [PASS] JupyterLab refuses requests without its token
+  [PASS] Code running in Jupyter can't become root through sudo, setuid programs or Docker
+  [PASS] Jupyter's token can't be read by other accounts (files and command lines)
+  [PASS] JupyterLab refuses requests for other host names (DNS rebinding)
+  [PASS] Jupyter's login token stays out of the system journal
+  [PASS] Jupyter's sandbox is in place (sgs-jupyter@ubuntu.service: exposure 2.2 by systemd-analyze security)
+  [PASS] No tunnel (cloudflared, Tailscale Funnel, ngrok) publishes this machine's services on the internet
+  [PASS] Ordinary users and containers can't reach the cloud metadata service (169.254.169.254)
+         Outbound traffic isn't limited (for sensitive work: sudo sgs-egress strict)
+  [PASS] Firewall blocks incoming connections by default
+
+== Kernel and audit
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, io_uring or line-discipline loading, no setuid core dumps, kexec or unprivileged userfaultfd, ptrace and perf limits, no ICMP redirects)
+         CPU side channels not fully mitigated: spec_rstack_overflow tsa (this is a VM: the host's microcode decides that, ask the provider)
+  [PASS] No programs beyond Ubuntu's own carry file capabilities
+  [PASS] Kernel lockdown is on (integrity): even root can't load unsigned modules or write kernel memory
+  [PASS] Ordinary users can't create user namespaces, even through aa-exec (tried 1password Discord QtWebEngineProcess)
+  [PASS] Audit log records changes to package sources, sudo, SSH, Docker, GPU hooks and the stack (35 rules)
+
+== Secrets
+  [PASS] No accounts in the disk group (raw disks, the cloud-init seed)
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+  [PASS] No cron job, service, startup file, login hook or SSH key changed since it was last accepted
+
+== SSH
+  [PASS] Password login is off
+  [PASS] Root can't log in
+  [PASS] SSH accepts only strong MACs and RSA keys, and one authorized_keys file
+  [PASS] X11 forwarding is off (a compromised server can't reach your desktop)
+  [PASS] This check re-runs daily, and the login message shows its latest result (sgs-check.timer)
+
+== Updates
+  [PASS] No pending security updates
+         70 other (non-security) updates available
+  [PASS] Automatic security updates are on
+  [PASS] Automatic updates cover Docker, the NVIDIA Container Toolkit, CUDA, cuDNN and NCCL
+         Automatic updates haven't completed a run yet
+  [PASS] apt's daily jobs have a time limit, so a hung download can't block updates for good
+  [PASS] No reboot needed
+
+== GPU test
+         GPU 0: NVIDIA A100-SXM4-80GB (UUID: GPU-df0b34fe-31e1-e4e9-f34a-8791d1f12892)
+  [PASS] PyTorch 2.15.0+cu132: 15.3 TFLOP/s (fp32 matmul) on NVIDIA A100-SXM4-80GB, convolution OK
+  [PASS] JAX 0.12.0.1: 108.8 TFLOP/s (fp32 matmul) on gpu, convolution OK
+  [PASS] TensorFlow 2.21.0: 19.5 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+
+== Combined risks
+  [PASS] No combination of the results above adds up to a way in
+
+== Severity: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW
+== Coverage: 69 of 69 checks ran
+== Result: 69 PASS, 0 WARN, 0 SKIP

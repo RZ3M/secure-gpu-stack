@@ -16,9 +16,14 @@ clean() { LC_ALL=C tr -cd '\040-\176\n'; }
 if [ -r "$last" ]; then
   when=$(date -r "$last" '+%Y-%m-%d %H:%M')
   result=$(sed -n 's/^== Result: //p' "$last" | tail -1 | clean)
+  severity=$(sed -n 's/^== Severity: //p' "$last" | tail -1 | clean)
   echo
   printf ' Last daily check (%s): %s\n' "$when" "${result:-no result, see sudo journalctl -u sgs-check}"
-  grep -E '^ *\[(WARN|FAIL)\]' "$last" | head -5 | clean | cut -c1-110 | sed 's/^ */   /'
+  [ -z "$severity" ] || printf '   %s\n' "$severity"
+  # The most serious first.
+  grep -E '^ *\[(WARN|FAIL)\]' "$last" \
+    | awk '{ p = ($2 == "CRITICAL:") ? 0 : ($2 == "HIGH:") ? 1 : ($2 == "MEDIUM:") ? 2 : 3; print p "\t" $0 }' \
+    | sort -s -n -k1,1 | cut -f2- | head -5 | clean | cut -c1-110 | sed 's/^ */   /'
   [ "$(grep -cE '^ *\[(WARN|FAIL)\]' "$last")" -le 5 ] || echo "   ... and more: sudo sgs-check"
   [ -n "$(find "$last" -mmin +4320 2>/dev/null)" ] && echo "   (more than 3 days old: is sgs-check.timer running?)"
 fi

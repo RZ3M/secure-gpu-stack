@@ -1,0 +1,20 @@
+== The stack works like Lambda Stack
+  [PASS] python3 is the stack's Python
+  [PASS] torch, tensorflow, jax, keras import: 2.15.0+cu132 2.21.0 0.12.0.1 3.15.1
+  [PASS] nvcc: release 13.0
+  [PASS] you can use the GPU (you're in the video group)
+  [PASS] the GPU device files aren't open to every local user
+== The stack can't be changed by accident
+  [PASS] the stack's packages and commands are read-only for a normal user
+== Users get their own environment on top
+  [PASS] sgs-venv sees the stack's torch and keeps new packages in its own folder
+== Jupyter is up, on a socket only you can open
+  [PASS] JupyterLab answers on its private socket with its token, and refuses without (/run/sgs-jupyter/ubuntu/jupyter.sock)
+  [PASS] nothing answers on localhost:8888, where any account could reach it
+  [PASS] JupyterLab doesn't answer on the network address (10.19.84.159)
+== Malicious model files: flagged by modelscan, refused by torch.load
+  [PASS] modelscan flags the booby-trapped model.pt
+  [PASS] modelscan flags the booby-trapped model.pkl
+  [PASS] torch.load refuses to run the model's hidden code (weights_only default)
+
+== All user checks passed

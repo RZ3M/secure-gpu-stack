@@ -1,0 +1,22 @@
+== MIG management as root, file locked
+Successfully destroyed compute instance ID  0 from GPU  0 GPU instance ID  2
+Successfully destroyed GPU instance ID  2 from GPU  0
+6
+3
+	[4mGPU0	CPU Affinity	NUMA Affinity	GPU NUMA ID[0m
+GPU0	 X 	0-29	0		N/A
+
+== umask 077 install left things usable (finding 84)
+755 /opt/sgs/venv
+777 /opt/sgs/venv/bin/python3
+755 /usr/local/bin/sgs-check
+755 /opt/sgs/tools
+nobody imports frameworks OK
+== sgs-check, MIG on (3 slices)
+  [PASS] GPU device files are for the video group only, and locked (ubuntu)
+  [PASS] GPU device spec matches the installed driver (/var/run/cdi/nvidia.yaml)
+  [PASS] The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)
+  [PASS] PyTorch 2.15.0+cu132: 2.5 TFLOP/s (fp32 matmul) on NVIDIA A100-SXM4-80GB MIG 1g.10gb, convolution OK
+  [PASS] JAX 0.12.0.1: 18.4 TFLOP/s (fp32 matmul) on gpu, convolution OK
+  [PASS] TensorFlow 2.21.0: 10.4 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+== Result: 58 PASS, 0 WARN, 0 SKIP

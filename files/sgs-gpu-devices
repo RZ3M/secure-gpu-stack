@@ -21,8 +21,9 @@
 # Locking needs the host's mount namespace (udevd's mounts are private), so
 # sgs-gpu-devices.service does it when the driver loads, before
 # nvidia-cdi-refresh and nvidia-persistenced; so does every nvidia-cdi-refresh
-# run, and install.sh. Only the files CUDA uses are touched; others (NVSwitch,
-# NVLink) are left for sgs-check to report. Exits 1 if any file isn't right.
+# run, and install.sh. Only the files CUDA uses are touched, plus the NVSwitch
+# control file (below); others (per-switch NVSwitch files, NVLink) are left for
+# sgs-check to report. Exits 1 if any file isn't right.
 lock=1
 [ "${1:-}" = --no-lock ] && lock=0
 gid=$(getent group video | cut -d: -f3)
@@ -43,6 +44,7 @@ unlock() {
 }
 loaded() { grep -q "^$1 " /proc/modules; }
 uvm_major=$(awk '$2 == "nvidia-uvm" { print $1 }' /proc/devices)
+nvswitch_major=$(awk '$2 == "nvidia-nvswitch" { print $1 }' /proc/devices)
 
 # The files the loaded modules need, as "path major minor".
 want() {
@@ -56,6 +58,12 @@ want() {
   if loaded nvidia_uvm && [ -n "$uvm_major" ]; then
     echo /dev/nvidia-uvm "$uvm_major" 0
     echo /dev/nvidia-uvm-tools "$uvm_major" 1
+  fi
+  # The driver registers NVSwitch even where there's none, and root's
+  # nvidia-smi creates the control file 0666 when it turns MIG on (Lambda
+  # A100, no NVSwitch). Fabric Manager and nvidia-smi run as root.
+  if [ -n "$nvswitch_major" ]; then
+    echo /dev/nvidia-nvswitchctl "$nvswitch_major" 255
   fi
 }
 devices=$(want)

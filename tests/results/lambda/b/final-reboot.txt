@@ -1,0 +1,18 @@
+== after reboot
+6.8.0-147-generic
+none [integrity] confidentiality
+Enabled, Disabled
+660 video /dev/nvidia-modeset
+660 video /dev/nvidia-nvswitchctl
+660 video /dev/nvidia-uvm
+660 video /dev/nvidia-uvm-tools
+660 video /dev/nvidia0
+660 video /dev/nvidiactl
+755 nvidia-persistenced /run/nvidia-persistenced
+nvidia-smi -L: 26 ms
+  [PASS] The stack's frameworks are all installed (PyTorch, TensorFlow, Keras, JAX, JupyterLab)
+  [PASS] PyTorch 2.15.0+cu132: 15.3 TFLOP/s (fp32 matmul) on NVIDIA A100-SXM4-80GB, convolution OK
+  [PASS] JAX 0.12.0.1: 108.3 TFLOP/s (fp32 matmul) on gpu, convolution OK
+  [PASS] TensorFlow 2.21.0: 19.5 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+== Result: 58 PASS, 0 WARN, 0 SKIP
+== All user checks passed

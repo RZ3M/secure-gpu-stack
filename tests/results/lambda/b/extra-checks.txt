@@ -1,0 +1,25 @@
+== metadata, ordinary user
+HTTP 000
+curl failed (exit 7)
+  took 9 ms
+== metadata, root
+HTTP 404
+== persistenced / fabricmanager / dcgm
+active
+not-found
+0
+== GPU container
+Status: Downloaded newer image for ubuntu:24.04
+GPU 0: NVIDIA A100-SXM4-80GB (UUID: GPU-df0b34fe-31e1-e4e9-f34a-8791d1f12892)
+== apt full-upgrade -s
+The following packages will be upgraded:
+70 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.
+== /etc/nccl.conf
+NCCL_IB_DISABLE=1
+== services not from Ubuntu or us
+auditd.service containerd.service cron.service dbus.service docker.service getty@tty1.service ModemManager.service multipathd.service nvidia-persistenced.service packagekit.service polkit.service rsyslog.service serial-getty@ttyS0.service sgs-jupyter@ubuntu.service ssh.service systemd-journald.service systemd-logind.service systemd-networkd.service systemd-resolved.service systemd-timesyncd.service systemd-udevd.service udisks2.service unattended-upgrades.service user@1000.service 
+== Lambda first-boot script left behind?
+vendor
+no lambda units
+== sgs-check after all that
+== Result: 55 PASS, 0 WARN, 0 SKIP

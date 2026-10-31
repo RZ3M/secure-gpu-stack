@@ -1,0 +1,60 @@
+== before (open)
+example.com HTTP 200
+Strict mode on: 15 allowed domains (/etc/sgs/egress-allow).
+  canonical.com: reachable
+  example.com: refused, as intended
+mode: Strict mode: on. 15 allowed domains in /etc/sgs/egress-allow (sudo sgs-egress status for more).
+== allowed (should work)
+  PyPI                                                       HTTP 200 (curl exit 0)
+  PyTorch's wheel index                                      HTTP 200 (curl exit 0)
+  Hugging Face API                                           HTTP 307 (curl exit 0)
+  GitHub                                                     HTTP 200 (curl exit 0)
+  pip download (a real package)                              six-1.17.0-py2.py3-none-any.whl
+== refused (should fail)
+  a domain not on the list                                   HTTP 000 (curl exit 6)
+  a raw IP address                                           HTTP 000 (curl exit 7)
+  DNS lookup of a name not on the list                       no answer
+  DNS straight to 8.8.8.8                                    refused: [Errno 1] Operation not permitted
+  a container reaching an allowed site                       wget: bad address 'pypi.org'
+  a host-network container                                   wget: can't connect to remote host (151.101.0.223): No route
+== root (not filtered, but lookups go through the list)
+  apt-get update                                             0 errors/warnings
+  root to example.com                                        HTTP 000 (exit 6)
+== sgs-check
+  [PASS] Outbound traffic is limited to 15 allowed domains (sgs-egress strict)
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, io_uring or line-discipline loading, no setuid core dumps, ptrace and perf
+  [PASS] This check re-runs daily, and the login message shows its latest result (sgs-check.timer)
+== Result: 56 PASS, 0 WARN, 0 SKIP
+== after a reboot in strict mode
+active active active active 
+mode: Strict mode: on. 15 allowed domains in /etc/sgs/egress-allow (sudo sgs-egress status for more).
+== allowed (should work)
+  PyPI                                                       HTTP 200 (curl exit 0)
+  PyTorch's wheel index                                      HTTP 200 (curl exit 0)
+  Hugging Face API                                           HTTP 307 (curl exit 0)
+  GitHub                                                     HTTP 200 (curl exit 0)
+  pip download (a real package)                              six-1.17.0-py2.py3-none-any.whl
+== refused (should fail)
+  a domain not on the list                                   HTTP 000 (curl exit 6)
+  a raw IP address                                           HTTP 000 (curl exit 7)
+  DNS lookup of a name not on the list                       no answer
+  DNS straight to 8.8.8.8                                    refused: [Errno 1] Operation not permitted
+  a container reaching an allowed site                       wget: bad address 'pypi.org'
+  a host-network container                                   wget: can't connect to remote host (151.101.128.223): No rou
+== root (not filtered, but lookups go through the list)
+  apt-get update                                             0 errors/warnings
+  root to example.com                                        HTTP 000 (exit 6)
+  [PASS] Outbound traffic is limited to 15 allowed domains (sgs-egress strict)
+  [PASS] Kernel hardening settings are on (pointer and dmesg restrictions, no unprivileged BPF, io_uring or line-discipline loading, no setuid core dumps, ptrace and perf
+  [PASS] This check re-runs daily, and the login message shows its latest result (sgs-check.timer)
+== Result: 56 PASS, 0 WARN, 0 SKIP
+== boot-time GPU state
+Enabled
+drwxr-x--- 2 nvidia-persistenced video 80 Oct
+socket in CDI spec: 2
+660 video /dev/nvidia-nvswitchctl
+== Result: 59 PASS, 0 WARN, 0 SKIP
+Strict mode off: outbound traffic is back to normal.
+Strict mode: off (sudo sgs-egress strict limits outbound traffic to /etc/sgs/egress-allow).
+example.com as ubuntu: HTTP 200
+== Result: 58 PASS, 0 WARN, 0 SKIP

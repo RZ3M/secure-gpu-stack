@@ -103,8 +103,46 @@ a way for any other account to get its code run as you through
 `torch.compile`'s cache in `/tmp`; see
 [docs/m2-test-bench.md](docs/m2-test-bench.md).
 
-Full output is in `tests/results/`. Lambda's cloud image, data-center GPUs
-and multi-GPU NCCL still need a Lambda instance; see
+**Real Lambda Cloud: two 1x A100 instances** (2026-10-30). One ran Lambda's
+default image, the other Lambda's plain Ubuntu 24.04 with this stack
+installed from the release tarball:
+
+| Test | Lambda Stack (Lambda's default image) | Secure GPU Stack |
+|---|---|---|
+| `sgs-check --gpu-test` (the version the audit ran) | 24 PASS, **30 WARN**, 1 SKIP | 58 PASS, **0 WARN**, 0 SKIP |
+| `sgs-check --gpu-test` after the audit's fixes (69 checks, each WARN rated) | Not re-run there; 12 of its problems planted on our instance were all caught: 1 CRITICAL, 7 HIGH, 4 MEDIUM, 1 LOW | 69 PASS, **0 WARN**, 0 at every severity |
+| The audit's attacks (token to root, `nobody` on the GPU, the user-namespace bypass, RDMA, the tunnel past the firewall) | 7 of 7 worked | All blocked |
+| JupyterLab | Public on the internet over plain HTTP, token in the URL | Private socket, SSH tunnel only |
+| Security updates | 228 pending, automatic updates off | Automatic |
+| GPU device files | Open to every account | Video group only, locked |
+| Training speed on the same A100 (Lambda Stack's PyTorch 2.7.0 vs ours) | 1,900 images/s, 177,696 tokens/s | 1,943 images/s, 187,640 tokens/s |
+
+Install: 19 minutes, unattended. Every earlier finding held when attacked
+directly on Lambda's hardware, and Lambda's hardware turned up five more
+(findings 86–90: a GPU device file that MIG opened to everyone, unaudited
+container specs, PyTorch and TensorFlow crashing when mixed in one notebook,
+an open persistence-daemon socket, and 3.5 s added to every CUDA program's
+start), all fixed and re-verified there. See
+[docs/lambda-test-bench.md](docs/lambda-test-bench.md).
+
+A separate read-only audit of Lambda's default image on the other instance
+found 2 Critical, 9 High, 7 Medium and 4 Low problems
+([docs/lambda-instance-audit.md](docs/lambda-instance-audit.md), attacks in
+[docs/lambda-instance-pocs.md](docs/lambda-instance-pocs.md); Lambda Stack
+findings 16–33 in [docs/lambda-stack-findings.md](docs/lambda-stack-findings.md)).
+The worst: JupyterLab is published to the internet over plain HTTP, and its
+token gives root through passwordless `sudo`, which the audit carried out end
+to end. Every finding was checked against this stack and every attack
+replayed on our instance. The result is a stronger `sgs-check`: it now rates
+each WARN as CRITICAL, HIGH, MEDIUM or LOW, flags combinations that add up to
+a way in, reports which checks ran, writes JSON (`--json`), can fail a
+pipeline (`--fail-on high`), and looks for what it missed on Lambda (public
+tunnels, any Jupyter's `sudo` and token, pipx environments, RDMA devices).
+Two more findings came out of it (91–92); see
+[docs/lambda-audit-response.md](docs/lambda-audit-response.md).
+
+Full output is in `tests/results/`. Multi-GPU NCCL, NVSwitch and InfiniBand
+still need an 8-GPU instance; see
 [docs/lambda-test-plan.md](docs/lambda-test-plan.md).
 
 ## Quick start
@@ -144,7 +182,11 @@ and multi-GPU NCCL still need a Lambda instance; see
    ```
 
 5. Open JupyterLab: on the GPU machine, `sgs-jupyter` prints the SSH tunnel
-   command to run on your own computer, and the URL to open.
+   command to run on your own computer, the URL to open, and the token to
+   paste on the login page (`sgs-jupyter --rotate` replaces it). Keep PyTorch and
+   TensorFlow GPU work in separate notebooks or scripts: TensorFlow uses its
+   own CUDA 12 libraries, and one process can't hold both builds of cuDNN
+   (a warning says so if you import both). JAX mixes fine with either.
 
 6. Each login shows the result of the daily check. If it reports changed
    startup files (a cron job, `~/.bashrc`, an SSH key and so on), look at
@@ -168,9 +210,11 @@ To test locally without a GPU, run `tests/test-local.sh`. It needs Multipass.
 
 - `install.sh`: the installer.
 - `bin/`: commands installed on the machine:
-  - `sgs-check`: the audit
+  - `sgs-check`: the audit; rates each WARN by severity, `--json` for a
+    machine-readable report, `--fail-on LEVEL` for scripts
   - `sgs-venv`: makes your own environment on top of the stack
-  - `sgs-jupyter`: prints the URL and SSH tunnel command
+  - `sgs-jupyter`: prints the SSH tunnel command, URL and token;
+    `--rotate` replaces the token
   - `sgs-sbom`: lists every installed apt and Python package as CycloneDX JSON
   - `sgs-egress`: an optional, experimental strict mode that limits outbound traffic to allowed domains
 - `python/`:

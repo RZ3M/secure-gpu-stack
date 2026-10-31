@@ -1,0 +1,1 @@
+torch.Size([8, 16, 62, 62]) cudnn 92600 nccl (2, 30, 7) cuda 13.2

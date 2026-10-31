@@ -1,0 +1,84 @@
+install exit=0
+  SSH: keys only, no root login
+  GPU device files: video group only (ubuntu added to video)
+  35 rules in /etc/audit/rules.d/60-sgs.rules (read with: sudo ausearch -k sgs-)
+drwxr-x--- 2 nvidia-persistenced video 80 Oct
+Enabled
+== sgs-jupyter --rotate
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+sudo: a password is required
+logged in with the old token is logged out.
+  TOKEN UNCHANGED
+active
+== sgs-check --gpu-test
+  exit=0
+== Severity: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW
+== Coverage: 69 of 69 checks ran
+== Result: 69 PASS, 0 WARN, 0 SKIP
+== fixtures
+fixture Jupyter on 8899: HTTP 200
+== sgs-check with the fixtures
+exit=1
+  [WARN] MEDIUM: Repositories that stopped changing, so no security fixes arrive through them: fixture.invalid/repo (last changed 300 days ago)
+  [WARN] HIGH: RDMA devices every account can open: /dev/knem (RDMA traffic bypasses the firewall and strict outbound mode)
+  [WARN] MEDIUM: pip may overwrite the OS's own Python packages (break-system-packages in /etc/pip.conf)
+  [WARN] HIGH: 49 vulnerability advisories in 4 of 6 Python packages (/home/ubuntu/.local/share/pipx/venvs/sgs-fixture)
+  [WARN] MEDIUM: JupyterLab listens on a localhost port every account on the machine can reach: 127.0.0.1:8899 (the stack's service uses a private socket)
+  [WARN] HIGH: Code running in Jupyter (or anyone with its token) becomes root in one step: pid 120176: ubuntu has passwordless sudo
+  [WARN] HIGH: Other accounts can read Jupyter's token: pid 120173's command line; pid 120176's command line
+  [WARN] MEDIUM: JupyterLab answers requests for any host name (allow_remote_access), so a web page can reach it through DNS rebinding: 127.0.0.1:8899
+         cloudflared configs owned by other accounts, not read: /home/ubuntu/.cloudflared/config.yml
+  [WARN] HIGH: Every account can read the tunnel's credentials: /etc/cloudflared/fixture.json (anyone holding them can run the tunnel elsewhere and serve its hostname; sudo chmod 600 them)
+  [WARN] HIGH: JupyterLab is published on the internet through a tunnel (sgs-fixture.invalid): anyone with its token runs code here, and the token travels in URLs
+  [WARN] LOW: Programs with file capabilities beyond Ubuntu's own: /usr/local/bin/sgs-captest 
+  [WARN] HIGH: Accounts in the disk group can read every disk, past all file permissions: ubuntu
+  [WARN] CRITICAL: Anyone on the internet who gets Jupyter's token becomes root: JupyterLab is published and its code can become root
+== Most serious
+  CRITICAL: Anyone on the internet who gets Jupyter's token becomes root: JupyterLab is published and its code can become root
+  HIGH: RDMA devices every account can open: /dev/knem (RDMA traffic bypasses the firewall and strict outbound mode)
+  HIGH: 49 vulnerability advisories in 4 of 6 Python packages (/home/ubuntu/.local/share/pipx/venvs/sgs-fixture)
+  HIGH: Code running in Jupyter (or anyone with its token) becomes root in one step: pid 120176: ubuntu has passwordless sudo
+  HIGH: Other accounts can read Jupyter's token: pid 120173's command line; pid 120176's command line
+  HIGH: Every account can read the tunnel's credentials: /etc/cloudflared/fixture.json (anyone holding them can run the tunnel elsewhere and serve its hostname; sudo chmod 600 them)
+  HIGH: JupyterLab is published on the internet through a tunnel (sgs-fixture.invalid): anyone with its token runs code here, and the token travels in URLs
+  HIGH: Accounts in the disk group can read every disk, past all file permissions: ubuntu
+== Severity: 1 CRITICAL, 7 HIGH, 4 MEDIUM, 1 LOW
+== Coverage: 70 of 70 checks ran
+== Result: 57 PASS, 13 WARN, 0 SKIP
+"runs as root" lines (want 0): 0
+user tunnel pattern fetched or named as a host (want 0 outside the "not read" note): 0
+token printed? /tmp/fixture-check.txt:0
+token printed? /tmp/fixture.json:0
+== --fail-on critical exit status: 1
+== after cleanup
+== Severity: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW
+== Result: 62 PASS, 0 WARN, 2 SKIP
+== PyTorch/TensorFlow warnings
+== TensorFlow only
+   exit=0
+== PyTorch only
+   exit=0
+== TensorFlow, then only asking whether torch and jax are installed
+   exit=0
+== PyTorch, then only asking whether tensorflow is installed
+   exit=0
+== TensorFlow, then PyTorch on the GPU (crashed before)
+<string>:1: RuntimeWarning: TensorFlow is already loaded in this process. PyTorch (CUDA 13) and TensorFlow (CUDA 12) nee
+   exit=136
+== PyTorch on the GPU, then TensorFlow
+<string>:1: RuntimeWarning: PyTorch is already loaded in this process. PyTorch (CUDA 13) and TensorFlow (CUDA 12) need d
+   exit=0
+== TensorFlow, then JAX
+   exit=0
+== TensorFlow, then JAX on the GPU (works)
+   exit=0
+== Keras (TensorFlow backend) model.fit
+   exit=0
+install exit=0
+== sgs-jupyter --rotate
+New token in place. Run sgs-jupyter to see it.
+  token changed
+active
+   sgs-jupyter --rotate):
+== Severity: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW
+== Result: 66 PASS, 0 WARN, 0 SKIP

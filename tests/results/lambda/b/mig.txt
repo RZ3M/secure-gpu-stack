@@ -1,0 +1,36 @@
+Successfully created GPU instance ID  1 on GPU  0 using profile MIG 3g.40gb (ID  9)
+Successfully created compute instance ID  0 on GPU  0 GPU instance ID  1 using profile MIG 3g.40gb (ID  2)
+Successfully created GPU instance ID  2 on GPU  0 using profile MIG 3g.40gb (ID  9)
+Successfully created compute instance ID  0 on GPU  0 GPU instance ID  2 using profile MIG 3g.40gb (ID  2)
+GPU 0: NVIDIA A100-SXM4-80GB (UUID: GPU-df0b34fe-31e1-e4e9-f34a-8791d1f12892)
+  MIG 3g.40gb     Device  0: (UUID: MIG-aba66bcd-3cf0-5b04-b04a-7fd5d1821799)
+  MIG 3g.40gb     Device  1: (UUID: MIG-7a58c247-6f55-5b2c-832b-22db9f23677e)
+== MIG device files
+total 0
+drwxr-xr-x  2 root root     160 Oct 30 20:37 .
+drwxr-xr-x 20 root root    4120 Oct 30 20:37 ..
+cr--------  1 root root 239,  1 Oct 30 20:27 nvidia-cap1
+cr--r--r--  1 root root 239, 12 Oct 30 20:37 nvidia-cap12
+cr--r--r--  1 root root 239, 13 Oct 30 20:37 nvidia-cap13
+cr--r--r--  1 root root 239,  2 Oct 30 20:27 nvidia-cap2
+cr--r--r--  1 root root 239, 21 Oct 30 20:37 nvidia-cap21
+cr--r--r--  1 root root 239, 22 Oct 30 20:37 nvidia-cap22
+660 video /dev/nvidia-modeset
+666 root /dev/nvidia-nvswitchctl
+660 video /dev/nvidia-uvm
+660 video /dev/nvidia-uvm-tools
+660 video /dev/nvidia0
+660 video /dev/nvidiactl
+== capability files
+444 /proc/driver/nvidia/capabilities/gpu0/mig/gi1/ci0/access
+444 /proc/driver/nvidia/capabilities/gpu0/mig/gi1/access
+444 /proc/driver/nvidia/capabilities/gpu0/mig/gi2/ci0/access
+444 /proc/driver/nvidia/capabilities/gpu0/mig/gi2/access
+slice: MIG-aba66bcd-3cf0-5b04-b04a-7fd5d1821799
+wrote 35840 MB of marker (40192 MB GPU)
+read 35840 MB fresh: marker found 0 times; non-zero bytes 0
+== a user outside video, on the slice
+cuInit failed: 100
+== sgs-check with MIG on
+  [WARN] GPU device files are open to every local user: /dev/nvidia-nvswitchctl (the stack manages the ones CUDA uses: /usr/local/sbin/sgs-gpu-devices)
+== Result: 54 PASS, 1 WARN, 0 SKIP

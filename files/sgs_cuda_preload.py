@@ -26,7 +26,11 @@ torch.compile's code caches out of /tmp (see the end of the file).
 
 Library names are shared across CUDA versions, so a process that imports both
 PyTorch and TensorFlow gets whichever cuDNN and NCCL loaded first. Keep GPU
-work for the two frameworks in separate processes.
+work for the two frameworks in separate processes. A notebook that mixes them
+dies without a word (on a Lambda A100: tensorflow first, then a PyTorch
+convolution, is a floating point exception; the other order fails TensorFlow's
+convolutions with cuDNN status 1008), so the second one to load warns first.
+JAX and TensorFlow work together.
 """
 import os
 import sys
@@ -68,6 +72,19 @@ def _point_xla_at_cuda12():
         os.environ["XLA_FLAGS"] = (flags + " --xla_gpu_cuda_data_dir=" + nvcc).strip()
 
 
+def _warn_mixed(first, second):
+    # JAX isn't named: tensorflow.lite imports it, and JAX and TensorFlow
+    # convolutions both worked in one process on the A100.
+    import warnings
+    warnings.warn(
+        f"{first} is already loaded in this process. PyTorch (CUDA 13) and TensorFlow "
+        f"(CUDA 12) need different builds of cuDNN and NCCL under the same names, so "
+        f"{second}'s GPU convolutions and NCCL can fail here or crash the process. "
+        f"Run GPU work for PyTorch and for TensorFlow in separate processes "
+        f"(separate notebooks or scripts).",
+        RuntimeWarning, stacklevel=3)
+
+
 class _PreloadingLoader:
     """Wraps tensorflow's real loader; preloads only when the module executes."""
 
@@ -80,8 +97,14 @@ class _PreloadingLoader:
     def exec_module(self, module):
         if self._finder in sys.meta_path:
             sys.meta_path.remove(self._finder)
+            mixed = "torch" in sys.modules
             _preload()
             _point_xla_at_cuda12()
+            _WarnAfterTensorFlow.tf_loaded = True
+            # Last: with warnings as errors (pytest's filterwarnings), raising
+            # here mustn't leave TensorFlow without its libraries.
+            if mixed:
+                _warn_mixed("PyTorch", "TensorFlow")
         # From here on tensorflow looks like any normally imported package.
         module.__loader__ = module.__spec__.loader = self._loader
         self._loader.exec_module(module)
@@ -101,6 +124,44 @@ class _PreloadForTensorFlow:
             if spec is not None:
                 if spec.loader is not None and hasattr(spec.loader, "exec_module"):
                     spec.loader = _PreloadingLoader(self, spec.loader)
+                return spec
+        return None
+
+
+class _WarningLoader:
+    """Wraps torch's real loader; warns only when the module executes."""
+
+    def __init__(self, loader):
+        self._loader = loader
+
+    def create_module(self, spec):
+        return self._loader.create_module(spec)
+
+    def exec_module(self, module):
+        _warn_mixed("TensorFlow", "PyTorch")
+        module.__loader__ = module.__spec__.loader = self._loader
+        self._loader.exec_module(module)
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
+
+
+class _WarnAfterTensorFlow:
+    """PyTorch imported after TensorFlow loaded its CUDA 12 libraries. Like the
+    preload, only a real import counts, not a find_spec probe."""
+
+    tf_loaded = False
+
+    def find_spec(self, name, path=None, target=None):
+        if not self.tf_loaded or name != "torch":
+            return None
+        for finder in sys.meta_path:
+            if finder is self or not hasattr(finder, "find_spec"):
+                continue
+            spec = finder.find_spec(name, path, target)
+            if spec is not None:
+                if spec.loader is not None and hasattr(spec.loader, "exec_module"):
+                    spec.loader = _WarningLoader(spec.loader)
                 return spec
         return None
 
@@ -166,3 +227,4 @@ _private_compile_caches()
 
 if os.path.isdir(_TF_CUDA):
     sys.meta_path.insert(0, _PreloadForTensorFlow())
+    sys.meta_path.insert(0, _WarnAfterTensorFlow())
