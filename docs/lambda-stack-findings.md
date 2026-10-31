@@ -2,32 +2,66 @@
 
 **Checked:** 2026-10-28, against Lambda's public install script, the apt
 repository at `archive.lambdalabs.com`, and a test Ubuntu 24.04 machine with
-Lambda's repository installed. Every finding below comes with the evidence and a
-way to reproduce it.
+Lambda's repository installed (findings 1–15); then on 2026-10-30, on a real
+Lambda Cloud instance running Lambda's default image (findings 16–33). Every
+finding comes with the evidence and a way to reproduce it.
 
-**Scope:** the software Lambda Stack installs on Ubuntu 24.04 ("noble"). Lambda
-Cloud's default image (JupyterLab exposure, default users, sudo, Docker group)
-still has to be checked on a real instance; see "Not yet verified" at the end.
+**Scope:** the software Lambda Stack installs on Ubuntu 24.04 ("noble"), and
+since 2026-10-30 Lambda Cloud's default image as well: JupyterLab exposure,
+default users, sudo, Docker, devices, network and logging.
+
+> **Real instance checked 2026-10-30.** A fresh Lambda Stack 24.04
+> `gpu_1x_a100_sxm4` instance was audited read-only. The full report, with
+> evidence and remediation, is [`docs/lambda-instance-audit.md`](lambda-instance-audit.md);
+> the raw domain reports are in [`docs/audit/`](audit/). The token → root
+> chain was then executed end-to-end (POC-1), and the public HTTP transport was
+> confirmed with a dummy token (POC-2): see
+> [`docs/lambda-instance-pocs.md`](lambda-instance-pocs.md). The `sgs-check`
+> blind spots and proposed scoring changes are in
+> [`docs/sgs-check-gaps.md`](sgs-check-gaps.md). It found 2 Critical,
+> 9 High, 7 Medium and 4 Low issues, including a public JupyterLab over plain
+> HTTP whose token is root via passwordless sudo, and 228 pending security
+> updates with automatic updates disabled. `sgs-check` scored the instance
+> **24 PASS / 30 WARN / 1 SKIP**. The "Not yet verified" list that used to end
+> this document is replaced by the verified addendum at the end.
 
 ## Summary
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| 1 | Lambda's apt pin blocks Ubuntu's NVIDIA driver security updates | High | Verified |
+| 1 | Lambda's apt pin blocks Ubuntu's NVIDIA driver security updates | High | Verified; on Lambda too (audit H-04) |
 | 2 | Default driver branch (R570) is end of life | High | Verified |
 | 3 | ML packages are months stale, with known code-execution CVEs | High | Verified |
-| 4 | NVIDIA Container Toolkit 1.18.1 predates a reported High CVE fix | High | Reported, not confirmed at the source |
-| 5 | Package repository is HTTP-only, with no expiry on its metadata | Medium | Verified |
-| 6 | Lambda's signing key is trusted for every repository on the machine | Medium | Verified |
+| 4 | NVIDIA Container Toolkit 1.18.1 predates a High CVE fix | High | Verified at NVIDIA's source (bulletin 5850) and on Lambda (H-04) |
+| 5 | Package repository is HTTP-only, with no expiry on its metadata | Medium | Verified; on Lambda too, frozen at 2025-12-31 (H-05) |
+| 6 | Lambda's signing key is trusted for every repository on the machine | Medium | Verified; on Lambda too (H-05) |
 | 7 | The install chain verifies nothing before running as root | Medium | Verified |
 | 8 | Ships flash-attn with an unfixed insecure-deserialization CVE | Medium | Verified |
-| 9 | Ubuntu's user-namespace restriction is bypassable, and Lambda Stack leaves it so | Medium | Verified (baseline VM) |
-| 10 | io_uring, behind most kCTF kernel exploits, is open to every user | Low | Verified (baseline VM) |
-| 11 | Any user can load terminal line-discipline modules, and ICMP redirects are accepted | Low | Verified (baseline VM) |
-| 12 | SSH allows X11 forwarding | Low | Verified (baseline VM) |
-| 13 | Nothing stops ordinary users or containers from reaching cloud metadata | Medium | Verified (baseline VM); whether Lambda serves metadata there isn't |
-| 14 | Kernel lockdown is off | Low | Verified (baseline VM, and M2 with a GPU) |
+| 9 | Ubuntu's user-namespace restriction is bypassable, and Lambda Stack leaves it so | Medium | Verified (baseline VM, and on Lambda: M-02, POC-4) |
+| 10 | io_uring, behind most kCTF kernel exploits, is open to every user | Low | Verified (baseline VM, and on Lambda: M-02) |
+| 11 | Any user can load terminal line-discipline modules, and ICMP redirects are accepted | Low | Verified (baseline VM, and on Lambda: M-02) |
+| 12 | SSH allows X11 forwarding | Low | Verified (baseline VM, and on Lambda: M-03) |
+| 13 | Nothing stops ordinary users or containers from reaching cloud metadata | Medium | Verified (baseline VM, and on Lambda: reachable by every account, but no data served there, L-01) |
+| 14 | Kernel lockdown is off | Low | Verified (baseline VM, M2 with a GPU, and on Lambda: M-02) |
 | 15 | The one-line install leaves a current Ubuntu 24.04 without a GPU driver | High | Verified (M2, RTX 3080 in a VM) |
+| 16 | JupyterLab is public on the internet over plain HTTP, with the token in the URL and no HSTS; the token is root | Critical | Verified on Lambda (audit C-01; executed as POC-1 and POC-2) |
+| 17 | 228 security updates are pending and automatic updates are off, the internet-facing OpenSSH among them | Critical | Verified on Lambda (C-02) |
+| 18 | Jupyter runs as a passwordless sudoer, with terminals on and no sandbox | High | Verified on Lambda (H-01; POC-1) |
+| 19 | The Jupyter and ML packages carry more than 100 known advisories, and JupyterLab sits in a pipx environment that neither apt nor automatic updates see | High | Verified on Lambda (H-02) |
+| 20 | The Cloudflare tunnel credential is readable by every account; cloudflared runs as root, unsandboxed, with debug endpoints on loopback; no Cloudflare Access in front | High | Verified on Lambda (H-03; POC-5, POC-6, POC-7) |
+| 21 | GPU, RDMA and knem device files are open to every account, and RDMA traffic bypasses the IP firewall | High | Verified on Lambda (H-06; POC-3, POC-5) |
+| 22 | No host firewall: `INPUT ACCEPT`, postfix and rpcbind listening on every interface, on a shared /20 private network | High | Verified on Lambda (H-07; reachability from neighbours inferred) |
+| 23 | No audit or detection layer: no auditd, logs local and wipeable with sudo, nothing notices a token being used | High | Verified on Lambda (H-08) |
+| 24 | The Jupyter token is fixed for the instance's life, stored 0644, accepted in the URL and never rotated; clones and snapshots inherit it | High | Verified on Lambda (H-09) |
+| 25 | The running kernel is 18 releases behind, and a full upgrade forces DKMS rebuilds against the pinned driver | High | Verified on Lambda (H-04, with findings 1 and 4) |
+| 26 | CPU microcode is behind: SRSO and TSA report "Vulnerable, no microcode" | Medium | Verified on Lambda (M-01) |
+| 27 | SSH allows root key login (to a forced command), agent forwarding and weak MACs, with no idle timeout or login throttling | Medium | Verified on Lambda (M-03) |
+| 28 | Root services run unsandboxed: cloudflared, Glances (no authentication), postfix, rpcbind | Medium | Verified on Lambda (M-04) |
+| 29 | Docker's defaults: rootful, no user-namespace remap, inter-container traffic on, uncapped logs | Medium | Verified on Lambda (M-05) |
+| 30 | Outbound traffic, DNS and NTP are unrestricted and unlogged | Medium | Verified on Lambda (M-06) |
+| 31 | pip is configured to override PEP 668's protection of the system Python; no hashes, index allowlist or scanners; apt and dpkg history stripped from the image | Medium | Verified on Lambda (M-07) |
+| 32 | `torch.compile` writes its cache group-writable under `/tmp` | Low | Verified on Lambda (L-02); the attack it allows is our finding 83 |
+| 33 | `pam_unix nullok`, umask 0002, unlimited locked memory, `/var/crash` mode 3777, no Jupyter idle culling, classic snaps and extra file capabilities | Low | Verified on Lambda (L-03, L-04) |
 
 ## 1. Lambda's apt pin blocks Ubuntu's NVIDIA driver security updates
 
@@ -277,21 +311,55 @@ sudo grep ': error:' /var/lib/dkms/nvidia/*/build/make.log
 
 Found on the M2 test bench (`docs/m2-test-bench.md`).
 
-## Not yet verified (needs a real Lambda instance)
+## Verified on a real Lambda instance (2026-10-30)
 
-- Whether JupyterLab on the default image is reachable from the internet, and
-  how it authenticates.
-- Default user setup: passwordless sudo, `docker` group membership, password
-  policy.
-- Lambda's documented failure of `apt full-upgrade` on 24.04 images. It's likely
-  related to finding 1.
-- Open ports and firewall state on a freshly launched instance.
-- Whether the GPU device files are 0666 on Lambda's own image. With Lambda
-  Stack installed and a real GPU (M2, `docs/m2-test-bench.md`) they are, and
-  they stay so after `sudo nvidia-smi`: `nobody` ran `nvidia-smi` and
-  allocated GPU memory.
-- Whether instances boot with Secure Boot, and so with kernel lockdown
-  (finding 14).
+The instance: Lambda Cloud `gpu_1x_a100_sxm4`, Ubuntu 24.04.4, kernel
+6.8.0-1046-nvidia, A100-SXM4-40GB, driver 580.105.08,
+`lambda-stack-cuda 0.1.17`, image files dated 2026-02-25. Read-only audit as
+`ubuntu` (passwordless sudo); no fixes applied. Full report:
+[`docs/lambda-instance-audit.md`](lambda-instance-audit.md). Raw reports:
+[`docs/audit/`](audit/), including the
+[`sgs-check` baseline](audit/sgs-check-lambda-baseline.txt) (24 PASS / 30 WARN /
+1 SKIP; all three frameworks on the GPU).
+
+| # | Real-instance result |
+|---|---|
+| 1 | **Confirmed.** Lambda's 580.105.08 at `Pin-Priority: 1001`; Ubuntu's 580.178.04 in `noble-security` at 500; no NVIDIA package in `apt upgrade`. |
+| 2 | **Update.** The public install script hardcodes R570, but this image uses R580 (supported LTS through 2028); the build is 73 patch releases behind, not an EOL branch. |
+| 3 | **Confirmed.** Repo `InRelease` 2025-12-31; Keras 3.10.0, PyTorch 2.7.0, fsspec 2024.3.1; 16/14/1 CVEs (OSV, deduplicated), max 9.8; no newer Lambda build. |
+| 4 | **Confirmed at NVIDIA's source.** Bulletin 5850, CVE-2026-24260, CVSS 8.5, fixed 1.19.1; NVIDIA's repo carries 1.20.1; the pin holds 1.18.1. |
+| 5 | **Confirmed.** HTTP only (HTTPS times out); `InRelease` 2025-12-31; no `Valid-Until`. |
+| 6 | **Confirmed.** `trusted.gpg.d` symlink; RSA-4096, 2018, no expiry; Mellanox's key is also global. |
+| 7 | **Not tested** on this instance; unchanged from the public-script analysis. |
+| 8 | **Not applicable** to this image: `flash-attn` is not installed. |
+| 9 | **Confirmed.** `aa-exec -p docker-default -- unshare -Ur id -u` → 0; `unconfined=0`; 91 unconfined/11 complain profiles; namespace has `CAP_NET_ADMIN`. |
+| 10 | **Confirmed.** `io_uring_disabled=0`; unprivileged `io_uring_setup` succeeds. |
+| 11 | **Partly.** `ldisc_autoload=1`; `TIOCSETD` loaded `ppp_async`/`slip`. `all.accept_redirects=0` here, but `default`/`eno1`/`docker0` are 1 and `send_redirects=1`; `sgs-check` flags them. |
+| 12 | **Confirmed.** `x11forwarding yes`. |
+| 13 | **Updated.** The endpoint exists but returns a generic 404/405 for AWS/GCP/Azure/OpenStack paths; no data found; still reachable by every user; block for defence in depth. |
+| 14 | **Confirmed.** Lockdown `[none]`; no Secure Boot/EFI; unsigned modules load; `kexec_load_disabled=0`. |
+| 15 | **Not tested** here; the image already has a working driver. Related risk: `apt upgrade` holds the kernel, `full-upgrade` leaves the pinned driver and forces 8 DKMS rebuilds. |
+
+**New findings not in #1–#15** are numbered 16–33 in the summary at the
+top, each with the audit's own ID (C-01 to L-04) so it can be looked up in
+the full report, which has the evidence and remediation. Our stack's answer
+to each one, and its replay on our own Lambda instance, is in
+[`docs/lambda-audit-response.md`](lambda-audit-response.md). `sgs-check`
+independently flagged the repository, the pin, the driver, unsigned modules,
+GPU device modes, the toolkit CVE, the firewall, auditd, root login, X11, the
+update backlog and the disabled automatic updates; what it missed (the
+public tunnel, the Jupyter-as-sudoer chain, the pipx environment, RDMA) is
+listed in [`docs/sgs-check-gaps.md`](sgs-check-gaps.md) and has since been
+added.
+
+**Still unverified:** #7 install chain and #15 fresh-install failure; east-west
+reachability from a second instance; whether the token differs between two
+instances (per-instance evidence is strong, but one sample cannot prove it);
+the Cloudflare dashboard/Access state; and CVE exploitation (the token chain and
+local primitives were executed as PoCs; the OpenSSH/kernel/driver CVEs were not,
+and the live tunnel was not hijacked). `apt-get full-upgrade` resolves in simulation on
+this instance, so Lambda's documented failure did not reproduce; a real upgrade
+was not attempted because it would change the driver/kernel pair.
 
 ## Sources
 

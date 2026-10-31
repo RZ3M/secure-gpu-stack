@@ -1,0 +1,20 @@
+--- SSH root login: auth accepted, forced command only (tested from the audit workstation) ---
+Please login as the user "ubuntu" rather than the user "root".
+
+ssh_exit=142
+
+POC-7: controls that held (negative results)
+--- Jupyter without a token ---
+/api/contents    403
+/api/kernels     403
+/lab             302
+--- metadata endpoint ---
+GET / -> 404
+IMDSv2 PUT -> 405
+--- docker socket as ubuntu ---
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+660 root:docker /var/run/docker.sock
+--- postfix relay: loopback vs instance address ---
+250 2.1.5 Ok
+-- from <instance-private-ip> --
+454 4.7.1 <x@example.net>: Relay access denied

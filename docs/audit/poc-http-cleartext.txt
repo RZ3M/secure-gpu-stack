@@ -1,0 +1,16 @@
+POC-2: public Jupyter over plain HTTP (dummy token; no real secret)
+tunnel hostname resolved: yes
+--- http:// response ---
+HTTP/1.1 302 Found
+Location: /lab?
+Server: cloudflare
+--- http:// login page ---
+status=200 scheme=HTTP
+<title>Jupyter Server
+--- client request line over HTTP (dummy token) ---
+0000: GET /login?token=POC_DUMMY_TOKEN HTTP/1.1
+002b: Host: <instance>.lambdaspaces.com
+--- https:// response headers ---
+HTTP/2 200 
+content-security-policy: frame-ancestors 'self'; report-uri /api/security/csp-report
+set-cookie: _xsrf=<redacted>; Path=/

@@ -1,0 +1,15 @@
+POC-6: cloudflared root daemon exposes unauthenticated debug endpoints and a world-readable credential
+--- process ---
+USER         PID COMMAND
+root        2692 /usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+--- loopback admin endpoints (no auth) ---
+/config              HTTP 200 bytes=1525
+/debug/pprof/        HTTP 200 bytes=2597
+/debug/pprof/heap    HTTP 200 bytes=12317
+/metrics             HTTP 200 bytes=15730
+/ready               HTTP 200 bytes=88
+--- unit sandbox score ---
+→ Overall exposure level for cloudflared.service: 9.6 UNSAFE :-{
+--- credential mode ---
+644 root:root /etc/cloudflared/config.yml
+644 root:root /etc/cloudflared/jupyter-tunnel.json

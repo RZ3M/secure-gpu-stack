@@ -1,0 +1,17 @@
+POC-5: unprivileged RDMA/knem and tunnel-secret exposure
+--- device permissions ---
+666 root:root /dev/infiniband/uverbs0
+666 root:root /dev/infiniband/rdma_cm
+666 root:root /dev/knem
+644 root:root /etc/cloudflared/jupyter-tunnel.json
+--- nobody opens /dev/knem ---
+knem-open-ok
+--- nobody sees the RDMA HCA ---
+hca_id:	mlx5_0
+			state:			PORT_ACTIVE (4)
+			link_layer:		Ethernet
+--- nobody can read the tunnel credential file ---
+tunnel-secret-readable
+keys: ['AccountTag', 'TunnelID', 'TunnelName', 'TunnelSecret']
+--- nobody cannot read the Jupyter token (home 0750) ---
+token-not-readable

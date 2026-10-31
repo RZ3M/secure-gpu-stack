@@ -1,0 +1,92 @@
+
+== Machine
+  Ubuntu 24.04.4 LTS, kernel 6.8.0-1046-nvidia, amd64
+  NVIDIA GPUs: 1
+  Stack: Lambda Stack
+
+== Package sources
+  [PASS] pkg.cloudflare.com: HTTPS, key limited to this source
+  [WARN] linux.mellanox.com: plain HTTP
+  [PASS] nvidia.github.io: HTTPS, key limited to this source
+  [WARN] ppa.launchpadcontent.net: plain HTTP
+  [PASS] packages.microsoft.com: HTTPS, key limited to this source
+  [WARN] archive.lambdalabs.com: plain HTTP, key not limited to this source
+  [PASS] download.docker.com: HTTPS, key limited to this source
+  [WARN] lambda-keyring.gpg is trusted for every repository, not just its own
+  [WARN] mellanox.gpg is trusted for every repository, not just its own
+  [WARN] Pin at 1001 overrides other sources and allows downgrades: /etc/apt/preferences.d/lambda-repository
+         
+  [PASS] apt can refresh its package lists
+
+== NVIDIA driver
+  [PASS] Driver branch R580 is supported by NVIDIA until 2028-06
+  [WARN] The installed driver isn't Ubuntu's build: nvidia-headless-580-server-open=580.105.08-0lambda0.24.04.1 nvidia-headless-no-dkms-580-server-open=580.105.08-0lambda0.24.04.1 nvidia-utils-580-server=580.105.08-0lambda0.24.04.1
+  [WARN] Ubuntu's newer driver is blocked by another source: nvidia-utils-580-server 580.105.08-0lambda0.24.04.1 (Ubuntu has 580.178.04-0ubuntu0.24.04.1, apt picks 580.105.08-0lambda0.24.04.1)
+  [PASS] GPU performance counters are admin-only
+  [WARN] An unsigned kernel module is loaded
+         
+  [WARN] GPU device files are open to every local user: /dev/nvidia-uvm-tools /dev/nvidia-uvm /dev/nvidia-modeset /dev/nvidiactl /dev/nvidia0 (the stack manages the ones CUDA uses: /usr/local/sbin/sgs-gpu-devices)
+
+== Containers
+  [WARN] NVIDIA Container Toolkit 1.18.1 is older than 1.19.1 (CVE-2026-24260)
+  [PASS] Nobody is in the root-equivalent docker group
+  [WARN] Published container ports are open to the network and bypass the firewall
+  [WARN] Containers can gain privileges through setuid programs (no-new-privileges is off)
+  [PASS] Containers get the GPU only when asked (--gpus or --device)
+  [PASS] GPU device spec matches the installed driver (/var/run/cdi/nvidia.yaml)
+
+== Python ML stack
+         Stack is mixed into the OS's own Python (/usr/lib/python3/dist-packages)
+         torch 2.7.0   tensorflow 2.19.0   keras 3.10.0   jax 0.6.0
+  [PASS] Stack packages are read-only for users
+  [PASS] Any account can use the stack (nobody found torch tensorflow jax)
+  [WARN] torch.compile keeps its generated code in /tmp/torchinductor_<user>, where any account can plant it first (set TORCHINDUCTOR_CACHE_DIR to a folder in your home)
+  [PASS] Commands first on everyone's PATH, and the stack's tools and libraries, can only be changed by root
+  [WARN] System CUDA libraries can override the stack's: libcublas.so.12 libcublasLt.so.12 libcudart.so.12 libcufft.so.11 libcurand.so.10 libcusolver.so.11 libcusparse.so.12 libnvJitLink.so.12 libnvrtc.so.12
+         Usually Ubuntu's nvidia-cuda-toolkit: sudo apt purge nvidia-cuda-toolkit && sudo apt autoremove
+  [PASS] pip uses a single package index (PyPI)
+  [PASS] No startup code in the stack beyond what its packages installed
+  [SKIP] Vulnerability audit needs pip-audit (set SGS_PIP_AUDIT=/path/to/pip-audit)
+  [PASS] The driver, CUDA, cuDNN, NCCL and container files match their packages (58 packages)
+
+== Network exposure
+  [WARN] Listening to the network besides SSH: 0.0.0.0:111 0.0.0.0:25 [::]:111 [::]:25
+         UDP listeners (blocked by the firewall's default deny): 0.0.0.0:111 [::]:111 
+  [WARN] JupyterLab listens on a localhost port every account on the machine can reach: 127.0.0.1:7000 (the stack's service uses a private socket)
+  [PASS] JupyterLab refuses requests without its token
+  [WARN] Code running in Jupyter can become root through sudo or setuid programs (pid 2713)
+  [WARN] Ordinary users can read the cloud metadata service (169.254.169.254), which can hold credentials or launch data
+  [WARN] Firewall is off: every listening program is reachable
+
+== Kernel and audit
+  [WARN] Kernel hardening settings loosened: kernel.io_uring_disabled=0 dev.tty.ldisc_autoload=1 net.ipv4.conf.default.accept_redirects=1 net.ipv4.conf.docker0.accept_redirects=1 net.ipv4.conf.eno1.accept_redirects=1 net.ipv4.conf.all.send_redirects=1 net.ipv4.conf.default.send_redirects=1 (and more)
+  [WARN] Kernel lockdown is off, since DKMS modules (iser isert kernel-mft-dkms knem mlnx-ofed-kernel nvidia-srv srp xpmem) have no trusted signature without Secure Boot: root can load unsigned kernel modules and write kernel memory
+  [WARN] Ordinary users can create user namespaces: through aa-exec -p 1password (kernel.apparmor_restrict_unprivileged_*)
+  [WARN] auditd isn't installed: changes leave no audit trail
+
+== Secrets
+  [PASS] Home folders are closed to other users
+  [PASS] Saved tokens and keys (Hugging Face, W&B, AWS, GCP, Kaggle, SSH) are private to their owner
+         Recorded 277 startup files to watch for changes (cron, services, startup files, login hooks, SSH keys)
+
+== SSH
+  [PASS] Password login is off
+  [WARN] Root login allowed (without-password)
+  [WARN] X11 forwarding is on: whoever takes over this machine can reach the screen and keystrokes of users connected with ssh -X
+
+== Updates
+  [WARN] 228 security updates waiting to be installed
+         75 other (non-security) updates available
+  [WARN] Automatic security updates are off
+  [WARN] Automatic updates skip these packages: docker-ce (Docker / Docker CE), containerd.io (Docker / Docker CE), nvidia-container-toolkit (lambdalabs.com / Lambda Labs Ubuntu repository (Noble)), libnvidia-container1 (lambdalabs.com / Lambda Labs Ubuntu repository (Noble)), libnccl2 (lambdalabs.com / Lambda Labs Ubuntu repository (Noble))
+         Automatic updates haven't completed a run yet
+  [WARN] apt's daily jobs have no time limit: apt-daily apt-daily-upgrade (one hung run can block every update)
+  [PASS] No reboot needed
+
+== GPU test
+         GPU 0: NVIDIA A100-SXM4-40GB (UUID: GPU-ac7f697f-e000-eda0-00c9-bff83a7da6c3)
+  [PASS] PyTorch 2.7.0: 14.6 TFLOP/s (fp32 matmul) on NVIDIA A100-SXM4-40GB, convolution OK
+  [PASS] JAX 0.6.0: 132.9 TFLOP/s (fp32 matmul) on gpu, convolution OK
+  [PASS] TensorFlow 2.19.0: 19.4 TFLOP/s (fp32 matmul) on device:GPU:0, convolution OK
+
+== Result: 24 PASS, 30 WARN, 1 SKIP

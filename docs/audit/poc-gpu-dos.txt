@@ -1,0 +1,16 @@
+POC-3: unprivileged GPU memory exhaustion (nobody)
+--- child process ---
+USER         PID COMMAND
+nobody     31322 /usr/bin/python3 /tmp/poc_gpu.py
+--- child output ---
+child_uid=65534
+uid=65534 allocated_gib=8.0 holding_s=10
+--- GPU compute apps ---
+pid, process_name, used_gpu_memory [MiB]
+31322, /usr/bin/python3, 8684 MiB
+--- GPU memory used ---
+memory.used [MiB], memory.total [MiB]
+8693 MiB, 40960 MiB
+--- GPU memory after ---
+memory.used [MiB], memory.total [MiB]
+0 MiB, 40960 MiB

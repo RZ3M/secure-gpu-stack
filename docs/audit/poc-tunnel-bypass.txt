@@ -1,0 +1,14 @@
+host resolved: yes
+https://login -> 200
+external 22 OPEN
+external 25 filtered/closed (TimeoutError)
+external 111 filtered/closed (TimeoutError)
+external 7000 filtered/closed (TimeoutError)
+Status: inactive
+LISTEN 0      128        127.0.0.1:7000       0.0.0.0:*    users:(("jupyter-lab",pid=2713,fd=7))                     
+LISTEN 0      100          0.0.0.0:25         0.0.0.0:*    users:(("master",pid=2423,fd=13))                         
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=2762,fd=3),("systemd",pid=1,fd=213))   
+LISTEN 0      4096         0.0.0.0:111        0.0.0.0:*    users:(("rpcbind",pid=1286,fd=4),("systemd",pid=1,fd=198))
+LISTEN 0      100             [::]:25            [::]:*    users:(("master",pid=2423,fd=14))                         
+LISTEN 0      4096            [::]:22            [::]:*    users:(("sshd",pid=2762,fd=4),("systemd",pid=1,fd=214))   
+LISTEN 0      4096            [::]:111           [::]:*    users:(("rpcbind",pid=1286,fd=6),("systemd",pid=1,fd=200))

