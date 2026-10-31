@@ -351,8 +351,9 @@ TensorFlow and JAX in the system Python. Options:
   The voiced MP4 is an asset of the v0.1.1 release (uploaded at the user's
   request); the version without the voice stays in `video/m2/out/`. The
   summary page (https://claude.ai/artifact/PMapXo4STPLTyPhiQq72nM) is at
-  version 5 (2026-10-30): a new "On real Lambda hardware" lead section
-  (before/after on the A100, the audit's seven attacks replayed, findings
+  version 6 (2026-10-30): a new "On real Lambda hardware" lead section
+  (before/after on the A100, the audit's seven attacks replayed, a step-by-step
+  token→root chain visual with where our stack cuts each link, findings
   86–92, the `sgs-check` scoring change), the old v0.1.1 section renamed to
   "M2", Lambda Stack findings 16–33 added to the findings list, and the two
   Lambda A100s added to the scoreboard and sources bar. Its source is rebuilt
